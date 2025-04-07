@@ -1,0 +1,9 @@
+{
+  "repos": [
+    {
+      "id": "taprootassets",
+      "organisation": "echennells",
+      "repository": "taproot_assets"
+    }
+  ]
+}
