@@ -1,9 +1,59 @@
-// /home/ubuntu/lnbits/lnbits/extensions/taproot_assets/static/js/index.js
+// Helper function to map transaction objects (works for both invoices and payments)
+const mapTransaction = function(transaction, type) {
+  // Create a clean copy
+  const mapped = {...transaction};
+  
+  // Set type and direction
+  mapped.type = type || (transaction.payment_hash ? 'invoice' : 'payment');
+  mapped.direction = mapped.type === 'invoice' ? 'incoming' : 'outgoing';
+  
+  // Format date consistently
+  if (mapped.created_at) {
+    try {
+      mapped.date = Quasar.date.formatDate(new Date(mapped.created_at), 'YYYY-MM-DD HH:mm');
+    } catch (e) {
+      console.error('Error formatting date:', e, mapped.created_at);
+      mapped.date = 'Invalid Date';
+    }
+  }
+  
+  // Ensure extra exists and contains asset info
+  mapped.extra = mapped.extra || {};
+  
+  if (mapped.type === 'invoice') {
+    // For invoices
+    if (!mapped.extra.asset_amount && mapped.asset_amount) {
+      mapped.extra.asset_amount = mapped.asset_amount;
+    }
+    
+    if (!mapped.extra.asset_id && mapped.asset_id) {
+      mapped.extra.asset_id = mapped.asset_id;
+    }
+  } else {
+    // For payments
+    mapped.extra = {
+      asset_amount: mapped.asset_amount,
+      asset_id: mapped.asset_id,
+      fee_sats: mapped.fee_sats
+    };
+  }
+  
+  return mapped;
+};
 
-new Vue({
+// Use the shared mapping function for both types
+const mapInvoice = function(invoice) {
+  return mapTransaction(invoice, 'invoice');
+};
+
+const mapPayment = function(payment) {
+  return mapTransaction(payment, 'payment');
+};
+
+window.app = Vue.createApp({
   el: '#vue',
   mixins: [windowMixin],
-  data: function() {
+  data() {
     return {
       settings: {
         tapd_host: '',
@@ -15,46 +65,96 @@ new Vue({
         lnd_macaroon_hex: ''
       },
       showSettings: false,
-      showInvoiceForm: false,
-      showInvoiceModal: false,
       assets: [],
       invoices: [],
-      selectedAsset: null,
-      invoiceForm: {
-        amount: 1,
-        memo: '',
-        expiry: 3600
+      payments: [],
+      combinedTransactions: [],
+
+      // Form dialog for creating invoices
+      invoiceDialog: {
+        show: false,
+        selectedAsset: null,
+        form: {
+          amount: 1,
+          memo: '',
+          expiry: 3600
+        }
       },
+
+      // Created invoice data
       createdInvoice: null,
-      showPayModal: false,
-      paymentRequest: '',
-      feeLimit: 1000,
-      paymentInProgress: false,
-      showPaymentSuccessModal: false
+
+      // For sending payments
+      paymentDialog: {
+        show: false,
+        selectedAsset: null,
+        form: {
+          paymentRequest: '',
+          feeLimit: 1000
+        },
+        inProgress: false
+      },
+
+      // Success dialog
+      successDialog: {
+        show: false
+      },
+
+      // Form submission tracking
+      isSubmitting: false,
+
+      // For transaction list display
+      transactionsLoading: false,
+      transitionEnabled: false,
+      transactionsTable: {
+        columns: [
+          {name: 'created_at', align: 'left', label: 'Date', field: 'date', sortable: true},
+          {name: 'direction', align: 'center', label: 'Type', field: 'direction'},
+          {name: 'memo', align: 'left', label: 'Description', field: 'memo'},
+          {name: 'amount', align: 'right', label: 'Amount', field: row => row.asset_amount || row.extra?.asset_amount},
+          {name: 'status', align: 'center', label: 'Status', field: 'status'}
+        ],
+        pagination: {
+          rowsPerPage: 10,
+          page: 1
+        }
+      },
+
+      // Refresh state tracking
+      refreshInterval: null,
+      refreshCount: 0
     }
   },
   computed: {
-    maxInvoiceAmount: function() {
-      if (!this.selectedAsset) return 0;
+    maxInvoiceAmount() {
+      if (!this.invoiceDialog.selectedAsset) return 0;
 
-      if (this.selectedAsset.channel_info) {
-        const totalCapacity = parseFloat(this.selectedAsset.channel_info.capacity);
-        const localBalance = parseFloat(this.selectedAsset.channel_info.local_balance);
+      const asset = this.invoiceDialog.selectedAsset;
+      if (asset.channel_info) {
+        const totalCapacity = parseFloat(asset.channel_info.capacity);
+        const localBalance = parseFloat(asset.channel_info.local_balance);
         return totalCapacity - localBalance;
       }
-
-      return parseFloat(this.selectedAsset.amount);
+      return parseFloat(asset.amount);
     },
-    isInvoiceAmountValid: function() {
-      if (!this.selectedAsset) return false;
-      return parseFloat(this.invoiceForm.amount) <= this.maxInvoiceAmount;
+    isInvoiceAmountValid() {
+      if (!this.invoiceDialog.selectedAsset) return false;
+      return parseFloat(this.invoiceDialog.form.amount) <= this.maxInvoiceAmount;
     }
   },
   methods: {
-    toggleSettings: function() {
-      this.showSettings = !this.showSettings;
+    // Helper method to find asset name by asset_id
+    findAssetName(assetId) {
+      if (!assetId || !this.assets || this.assets.length === 0) return null;
+      const asset = this.assets.find(a => a.asset_id === assetId);
+      return asset ? asset.name : null;
     },
-    getSettings: function() {
+
+    toggleSettings() {
+      this.showSettings = !this.showSettings
+    },
+    
+    getSettings() {
       if (!this.g.user.wallets.length) return;
       const wallet = this.g.user.wallets[0];
 
@@ -65,10 +165,10 @@ new Vue({
         })
         .catch(err => {
           console.error('Failed to fetch settings:', err);
-          LNbits.utils.notifyApiError(err);
         });
     },
-    saveSettings: function() {
+    
+    saveSettings() {
       if (!this.g.user.wallets.length) return;
       const wallet = this.g.user.wallets[0];
 
@@ -77,22 +177,13 @@ new Vue({
         .then(response => {
           this.settings = response.data;
           this.showSettings = false;
-          // Vue 2 doesn't have built-in success notification, using LNbits.utils
-          if (LNbits.utils.notifySuccess) {
-            LNbits.utils.notifySuccess('Settings saved successfully');
-          } else {
-            this.$q.notify({
-              type: 'positive',
-              message: 'Settings saved successfully'
-            });
-          }
         })
         .catch(err => {
           console.error('Failed to save settings:', err);
-          LNbits.utils.notifyApiError(err);
         });
     },
-    getAssets: function() {
+    
+    getAssets() {
       if (!this.g.user.wallets.length) return;
       const wallet = this.g.user.wallets[0];
 
@@ -100,205 +191,390 @@ new Vue({
         .request('GET', '/taproot_assets/api/v1/taproot/listassets', wallet.adminkey)
         .then(response => {
           this.assets = Array.isArray(response.data) ? response.data : [];
-          console.log('Loaded assets:', this.assets);
+          if (this.assets.length > 0) {
+            this.updateTransactionDescriptions();
+          }
         })
         .catch(err => {
           console.error('Failed to fetch assets:', err);
-          LNbits.utils.notifyApiError(err);
           this.assets = [];
         });
     },
-    getInvoices: function() {
-      this.invoices = [];
+    
+    updateTransactionDescriptions() {
+      // Update both invoices and payments with asset names
+      const updateMemo = (item) => {
+        const assetName = this.findAssetName(item.asset_id);
+        if (assetName) {
+          item.memo = `Taproot Asset Transfer: ${assetName}`;
+        }
+      };
+      
+      this.invoices.forEach(updateMemo);
+      this.payments.forEach(updateMemo);
+      
+      // Refresh combined transactions
+      this.combineTransactions();
     },
-    createInvoice: function(asset) {
-      this.selectedAsset = asset;
-      console.log('Selected asset:', asset);
-      this.showInvoiceForm = true;
-      this.invoiceForm.amount = 1;
-      this.invoiceForm.memo = '';
-      this.invoiceForm.expiry = 3600;
-    },
-    showSendForm: function(asset) {
-      this.selectedAsset = asset;
-      console.log('Selected asset for sending:', asset);
-      this.paymentRequest = '';
-      this.feeLimit = 1000;
-      this.showPayModal = true;
-    },
-    resetForm: function() {
-      console.log('Form reset');
-      this.selectedAsset = null;
-      this.invoiceForm.amount = 1;
-      this.invoiceForm.memo = '';
-      this.invoiceForm.expiry = 3600;
-      this.createdInvoice = null;
-      this.showInvoiceForm = false;
-    },
-    submitInvoice: function() {
+    
+    getInvoices(isInitialLoad = false) {
       if (!this.g.user.wallets.length) return;
       const wallet = this.g.user.wallets[0];
 
-      if (!this.selectedAsset) {
-        // Vue 2 compatible notification
-        if (LNbits.utils.notifyError) {
-          LNbits.utils.notifyError('Please select an asset first by clicking RECEIVE on one of your assets.');
-        } else {
-          this.$q.notify({
-            type: 'negative',
-            message: 'Please select an asset first by clicking RECEIVE on one of your assets.'
-          });
-        }
-        return;
+      // Only show loading indicator on initial load
+      if (isInitialLoad || this.invoices.length === 0) {
+        this.transactionsLoading = true;
       }
 
-      const amount = parseFloat(this.invoiceForm.amount);
-      const max = this.maxInvoiceAmount;
+      const timestamp = new Date().getTime();
+      this.refreshCount++;
 
-      if (amount > max) {
-        // Vue 2 compatible notification
-        if (LNbits.utils.notifyError) {
-          LNbits.utils.notifyError(`Amount exceeds maximum receivable. Maximum: ${max}`);
-        } else {
-          this.$q.notify({
-            type: 'negative',
-            message: `Amount exceeds maximum receivable. Maximum: ${max}`
-          });
-        }
-        this.invoiceForm.amount = max;
-        return;
+      LNbits.api
+        .request('GET', `/taproot_assets/api/v1/taproot/invoices?_=${timestamp}`, wallet.adminkey)
+        .then(response => {
+          // Process invoices with asset names
+          const processedInvoices = Array.isArray(response.data)
+            ? response.data.map(invoice => {
+                const mappedInvoice = mapInvoice(invoice);
+                const assetName = this.findAssetName(mappedInvoice.asset_id);
+                if (assetName) {
+                  mappedInvoice.memo = `Taproot Asset Transfer: ${assetName}`;
+                }
+                return mappedInvoice;
+              })
+            : [];
+
+          // Update or set invoices based on changes
+          if (this.invoices.length === 0 || isInitialLoad) {
+            this.invoices = processedInvoices;
+          } else if (this.checkForChanges(processedInvoices, this.invoices)) {
+            this.invoices = processedInvoices;
+          }
+
+          // Combine transactions and enable transitions
+          this.combineTransactions();
+          if (!this.transitionEnabled) {
+            setTimeout(() => {
+              this.transitionEnabled = true;
+            }, 500);
+          }
+        })
+        .catch(err => {
+          console.error('Failed to fetch invoices:', err);
+        })
+        .finally(() => {
+          this.transactionsLoading = false;
+        });
+    },
+    
+    getPayments(isInitialLoad = false) {
+      if (!this.g.user.wallets.length) return;
+      const wallet = this.g.user.wallets[0];
+
+      // Only show loading indicator if needed
+      if ((isInitialLoad || this.payments.length === 0) && !this.transactionsLoading) {
+        this.transactionsLoading = true;
       }
 
-      let assetId = this.selectedAsset.asset_id || '';
+      const timestamp = new Date().getTime();
+
+      LNbits.api
+        .request('GET', `/taproot_assets/api/v1/taproot/payments?_=${timestamp}`, wallet.adminkey)
+        .then(response => {
+          // Process payments with asset names
+          const processedPayments = Array.isArray(response.data)
+            ? response.data.map(payment => {
+                const mappedPayment = mapPayment(payment);
+                const assetName = this.findAssetName(mappedPayment.asset_id);
+                if (assetName) {
+                  mappedPayment.memo = `Taproot Asset Transfer: ${assetName}`;
+                }
+                return mappedPayment;
+              })
+            : [];
+
+          this.payments = processedPayments;
+          this.combineTransactions();
+        })
+        .catch(err => {
+          console.error('Failed to fetch payments:', err);
+        })
+        .finally(() => {
+          this.transactionsLoading = false;
+        });
+    },
+    
+    combineTransactions() {
+      // Combine invoices and payments, sort by date
+      this.combinedTransactions = [
+        ...this.invoices,
+        ...this.payments
+      ].sort((a, b) => {
+        return new Date(b.created_at) - new Date(a.created_at);
+      });
+    },
+
+    // Check if transactions have changed
+    checkForChanges(newItems, existingItems) {
+      // Quick length check
+      if (newItems.length !== existingItems.length) {
+        return true;
+      }
+
+      // Create lookup map
+      const existingMap = {};
+      existingItems.forEach(item => {
+        existingMap[item.id] = item;
+      });
+
+      let hasChanges = false;
+
+      // Compare items
+      for (const newItem of newItems) {
+        const existingItem = existingMap[newItem.id];
+        
+        // New item
+        if (!existingItem) {
+          newItem._isNew = true;
+          hasChanges = true;
+          continue;
+        }
+        
+        // Status changed
+        if (existingItem.status !== newItem.status) {
+          newItem._previousStatus = existingItem.status;
+          newItem._statusChanged = true;
+          hasChanges = true;
+        }
+      }
+
+      return hasChanges;
+    },
+    
+    // Invoice dialog methods
+    openInvoiceDialog(asset) {
+      this.resetInvoiceForm();
+      this.invoiceDialog.selectedAsset = asset;
+      this.invoiceDialog.show = true;
+    },
+    
+    resetInvoiceForm() {
+      this.invoiceDialog.form = {
+        amount: 1,
+        memo: '',
+        expiry: 3600
+      };
+      this.isSubmitting = false;
+      this.createdInvoice = null;
+    },
+    
+    closeInvoiceDialog() {
+      this.invoiceDialog.show = false;
+      this.resetInvoiceForm();
+    },
+    
+    submitInvoiceForm() {
+      if (this.isSubmitting || !this.g.user.wallets.length) return;
+      
+      const wallet = this.g.user.wallets[0];
+      this.isSubmitting = true;
+
+      // Build request payload
       const payload = {
-        asset_id: assetId,
-        amount: parseFloat(this.invoiceForm.amount),
-        memo: this.invoiceForm.memo,
-        expiry: this.invoiceForm.expiry
+        asset_id: this.invoiceDialog.selectedAsset.asset_id || '',
+        amount: parseFloat(this.invoiceDialog.form.amount),
+        memo: this.invoiceDialog.form.memo,
+        expiry: this.invoiceDialog.form.expiry
       };
 
-      if (this.selectedAsset.channel_info && this.selectedAsset.channel_info.peer_pubkey) {
-        payload.peer_pubkey = this.selectedAsset.channel_info.peer_pubkey;
-        console.log('Using peer_pubkey:', payload.peer_pubkey);
+      // Add peer_pubkey if available
+      if (this.invoiceDialog.selectedAsset.channel_info?.peer_pubkey) {
+        payload.peer_pubkey = this.invoiceDialog.selectedAsset.channel_info.peer_pubkey;
       }
-
-      console.log('Submitting invoice:', payload);
 
       LNbits.api
         .request('POST', '/taproot_assets/api/v1/taproot/invoice', wallet.adminkey, payload)
         .then(response => {
           this.createdInvoice = response.data;
-          // Vue 2 compatible notification
-          if (LNbits.utils.notifySuccess) {
-            LNbits.utils.notifySuccess('Invoice created successfully');
-          } else {
-            this.$q.notify({
-              type: 'positive',
-              message: 'Invoice created successfully'
-            });
+
+          // Add asset name for display
+          if (this.invoiceDialog.selectedAsset?.name) {
+            this.createdInvoice.asset_name = this.invoiceDialog.selectedAsset.name;
           }
+
+          // Copy to clipboard
+          this.copyInvoice(response.data.payment_request || response.data.id);
+
+          // Refresh transactions list
+          this.refreshTransactions();
         })
         .catch(err => {
           console.error('Failed to create invoice:', err);
-          LNbits.utils.notifyApiError(err);
+        })
+        .finally(() => {
+          this.isSubmitting = false;
         });
     },
-    payInvoice: function() {
-      if (!this.g.user.wallets.length) return;
-      const wallet = this.g.user.wallets[0];
-
-      if (!this.paymentRequest) {
-        // Vue 2 compatible notification
-        if (LNbits.utils.notifyError) {
-          LNbits.utils.notifyError('Please enter an invoice to pay');
-        } else {
-          this.$q.notify({
-            type: 'negative',
-            message: 'Please enter an invoice to pay'
-          });
-        }
+    
+    // Payment dialog methods
+    openPaymentDialog(asset) {
+      this.resetPaymentForm();
+      this.paymentDialog.selectedAsset = asset;
+      this.paymentDialog.show = true;
+    },
+    
+    resetPaymentForm() {
+      this.paymentDialog.form = {
+        paymentRequest: '',
+        feeLimit: 1000
+      };
+      this.paymentDialog.inProgress = false;
+    },
+    
+    closePaymentDialog() {
+      this.paymentDialog.show = false;
+      this.resetPaymentForm();
+    },
+    
+    async submitPaymentForm() {
+      if (this.paymentDialog.inProgress || !this.g.user.wallets.length) return;
+      if (!this.paymentDialog.form.paymentRequest) {
+        console.error('Please enter an invoice to pay');
         return;
       }
 
-      this.paymentInProgress = true;
+      try {
+        this.paymentDialog.inProgress = true;
+        const wallet = this.g.user.wallets[0];
 
-      const payload = {
-        payment_request: this.paymentRequest,
-        fee_limit_sats: this.feeLimit
-      };
+        // Create payload
+        const payload = {
+          payment_request: this.paymentDialog.form.paymentRequest,
+          fee_limit_sats: this.paymentDialog.form.feeLimit
+        };
 
-      if (this.selectedAsset && this.selectedAsset.channel_info && this.selectedAsset.channel_info.peer_pubkey) {
-        payload.peer_pubkey = this.selectedAsset.channel_info.peer_pubkey;
-        console.log('Using peer_pubkey for payment:', payload.peer_pubkey);
+        // Add peer_pubkey if available
+        if (this.paymentDialog.selectedAsset?.channel_info?.peer_pubkey) {
+          payload.peer_pubkey = this.paymentDialog.selectedAsset.channel_info.peer_pubkey;
+        }
+
+        // Make the payment request
+        const response = await LNbits.api.request(
+          'POST',
+          '/taproot_assets/api/v1/taproot/pay',
+          wallet.adminkey,
+          payload
+        );
+
+        // Show success and refresh data
+        this.paymentDialog.show = false;
+        this.successDialog.show = true;
+        await this.getAssets();
+        await this.refreshTransactions();
+
+      } catch (error) {
+        console.error('Payment failed:', error);
+      } finally {
+        this.paymentDialog.inProgress = false;
       }
-
-      LNbits.api
-        .request('POST', '/taproot_assets/api/v1/taproot/pay', wallet.adminkey, payload)
-        .then(response => {
-          this.paymentInProgress = false;
-          this.showPayModal = false;
-          this.showPaymentSuccessModal = true;
-          this.paymentRequest = '';
-          this.getAssets();
-          console.log('Payment successful:', response);
-        })
-        .catch(err => {
-          this.paymentInProgress = false;
-          LNbits.utils.notifyApiError(err);
-        });
     },
-    copyInvoice: function(invoice) {
+    
+    // Utility methods
+    copyInvoice(invoice) {
       const textToCopy = typeof invoice === 'string'
         ? invoice
         : (invoice.payment_request || invoice.id || JSON.stringify(invoice) || 'No invoice data available');
 
-      // Using LNbits utility function for copying text
-      LNbits.utils.copyText(textToCopy, 'Invoice copied to clipboard');
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(textToCopy)
+          .then(() => {
+            console.log('Invoice copied to clipboard');
+          })
+          .catch(err => {
+            console.error('Clipboard API failed:', err);
+            this.fallbackCopy(textToCopy);
+          });
+      } else {
+        this.fallbackCopy(textToCopy);
+      }
     },
-    formatDate: function(timestamp) {
-      if (!timestamp) return '';
-      const date = new Date(timestamp * 1000);
-      return date.toLocaleString();
+    
+    fallbackCopy(text) {
+      const tempInput = document.createElement('input');
+      tempInput.value = text;
+      document.body.appendChild(tempInput);
+      tempInput.select();
+      document.execCommand('copy');
+      document.body.removeChild(tempInput);
     },
-    getStatusColor: function(status) {
+    
+    getStatusColor(status) {
       switch (status) {
         case 'paid':
+        case 'completed':
           return 'positive';
         case 'pending':
           return 'warning';
         case 'expired':
           return 'negative';
         case 'cancelled':
-          return 'grey';
         default:
           return 'grey';
       }
-    }
-  },
-  watch: {
-    'invoiceForm.amount': function(newAmount) {
-      const amount = parseFloat(newAmount);
-      const max = this.maxInvoiceAmount;
-
-      if (amount > max) {
-        this.invoiceForm.amount = max;
-        // Vue 2 compatible notification
-        if (LNbits.utils.notifyWarning) {
-          LNbits.utils.notifyWarning(`Amount capped at maximum receivable: ${max}`);
-        } else {
-          this.$q.notify({
-            type: 'warning',
-            message: `Amount capped at maximum receivable: ${max}`
-          });
-        }
+    },
+    
+    refreshTransactions() {
+      this.getInvoices(true);
+      this.getPayments(true);
+    },
+    
+    startAutoRefresh() {
+      this.stopAutoRefresh();
+      this.refreshInterval = setInterval(() => {
+        this.getInvoices();
+        this.getPayments();
+      }, 10000); // 10 seconds
+    },
+    
+    stopAutoRefresh() {
+      if (this.refreshInterval) {
+        clearInterval(this.refreshInterval);
+        this.refreshInterval = null;
       }
     }
   },
-  created: function() {
+  
+  created() {
     if (this.g.user.wallets.length) {
       this.getSettings();
       this.getAssets();
-      this.getInvoices();
+      this.getInvoices(true);
+      this.getPayments(true);
+      this.startAutoRefresh();
     }
+  },
+  
+  mounted() {
+    setTimeout(() => {
+      this.refreshTransactions();
+    }, 500);
+  },
+  
+  activated() {
+    if (this.g.user.wallets.length) {
+      this.resetInvoiceForm();
+      this.resetPaymentForm();
+      this.refreshTransactions();
+      this.getAssets();
+      this.startAutoRefresh();
+    }
+  },
+  
+  deactivated() {
+    this.stopAutoRefresh();
+  },
+  
+  beforeUnmount() {
+    this.stopAutoRefresh();
   }
 });
