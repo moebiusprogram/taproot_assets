@@ -9,16 +9,16 @@ from lnbits.wallets.tapd_grpc_files import taprootassets_pb2
 from lnbits.wallets.tapd_grpc_files.rfqrpc import rfq_pb2
 from lnbits.wallets.tapd_grpc_files.tapchannelrpc import tapchannel_pb2
 from lnbits.wallets.lnd_grpc_files import lightning_pb2
-from lnbits.wallets.lnd_grpc_files.routerrpc import router_pb2
-from lnbits.wallets.lnd_grpc_files.invoicesrpc import invoices_pb2
+from lnbits.wallets.lnd_grpc_files import router_pb2
+from lnbits.wallets.lnd_grpc_files import invoices_pb2
 
 # GRPC services
 from lnbits.wallets.tapd_grpc_files import taprootassets_pb2_grpc
 from lnbits.wallets.tapd_grpc_files.rfqrpc import rfq_pb2_grpc
 from lnbits.wallets.tapd_grpc_files.tapchannelrpc import tapchannel_pb2_grpc
 from lnbits.wallets.lnd_grpc_files import lightning_pb2_grpc
-from lnbits.wallets.lnd_grpc_files.routerrpc import router_pb2_grpc
-from lnbits.wallets.lnd_grpc_files.invoicesrpc import invoices_pb2_grpc
+from lnbits.wallets.lnd_grpc_files import router_pb2_grpc
+from lnbits.wallets.lnd_grpc_files import invoices_pb2_grpc
 
 # Create service client factory functions
 def create_taprootassets_client(channel):
