@@ -1,19 +1,11 @@
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from http import HTTPStatus
+from typing import Optional, List, Dict, Any, Generic, TypeVar, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-
-class TaprootSettings(BaseModel):
-    """Settings for the Taproot Assets extension."""
-    tapd_host: str = "lit:10009"
-    tapd_network: str = "mainnet"
-    tapd_tls_cert_path: str = "/root/.lnd/tls.cert"
-    tapd_macaroon_path: str = "/root/.tapd/data/mainnet/admin.macaroon"
-    tapd_macaroon_hex: Optional[str] = None
-    lnd_macaroon_path: str = "/root/.lnd/data/chain/bitcoin/mainnet/admin.macaroon"
-    lnd_macaroon_hex: Optional[str] = None
-    default_sat_fee: int = 1  # Default satoshi fee for Taproot Asset transfers
+# Define a generic type variable for response data
+T = TypeVar('T')
 
 
 class TaprootAsset(BaseModel):
@@ -38,7 +30,7 @@ class TaprootInvoiceRequest(BaseModel):
     """Request model for creating a Taproot Asset invoice."""
     asset_id: str
     amount: int
-    memo: Optional[str] = None
+    description: Optional[str] = None
     expiry: Optional[int] = None
     peer_pubkey: Optional[str] = None  # Add peer_pubkey parameter for multi-channel support
 
@@ -46,8 +38,9 @@ class TaprootInvoiceRequest(BaseModel):
 class TaprootPaymentRequest(BaseModel):
     """Request model for paying a Taproot Asset invoice."""
     payment_request: str
-    fee_limit_sats: Optional[int] = 1000  # Default to 1000 sats fee limit
+    fee_limit_sats: Optional[int] = 10  # Default to 10 sats fee limit
     peer_pubkey: Optional[str] = None  # Add peer_pubkey for multi-channel support
+    asset_id: Optional[str] = None  # Add asset_id to specify which asset to use for payment
 
 
 class TaprootInvoice(BaseModel):
@@ -58,7 +51,7 @@ class TaprootInvoice(BaseModel):
     asset_id: str
     asset_amount: int
     satoshi_amount: int  # Satoshi amount for protocol requirements (from settings)
-    memo: Optional[str] = None
+    description: Optional[str] = None
     status: str = "pending"
     user_id: str
     wallet_id: str
@@ -75,7 +68,7 @@ class TaprootPayment(BaseModel):
     asset_id: str
     asset_amount: int
     fee_sats: int
-    memo: Optional[str] = None
+    description: Optional[str] = None
     status: str = "completed"
     user_id: str
     wallet_id: str
@@ -83,12 +76,110 @@ class TaprootPayment(BaseModel):
     preimage: Optional[str] = None
 
 
-class FeeTransaction(BaseModel):
-    """Model for tracking satoshi fee transactions."""
+class AssetBalance(BaseModel):
+    """Model for a user's asset balance."""
     id: str
-    user_id: str
     wallet_id: str
-    asset_payment_hash: str
-    fee_amount_msat: int
-    status: str  # "deducted", "refunded", or "failed"
+    asset_id: str
+    balance: int
+    last_payment_hash: Optional[str] = None
     created_at: datetime
+    updated_at: datetime
+
+
+class AssetTransaction(BaseModel):
+    """Model for an asset transaction."""
+    id: str
+    wallet_id: str
+    asset_id: str
+    payment_hash: Optional[str] = None
+    amount: int
+    fee: int = 0
+    description: Optional[str] = None
+    type: str  # 'credit', 'debit'
+    created_at: datetime
+
+
+# API Response Models
+
+class ErrorDetail(BaseModel):
+    """Model for detailed error information."""
+    code: Optional[str] = None
+    source: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+
+
+class ApiResponse(Generic[T]):
+    """
+    Generic API response model.
+    
+    This model provides a standardized structure for all API responses,
+    with consistent fields for success status, data, and error information.
+    """
+    success: bool
+    data: Optional[T] = None
+    error: Optional[str] = None
+    details: Optional[ErrorDetail] = None
+    
+    @classmethod
+    def success_response(cls, data: Optional[T] = None) -> Dict[str, Any]:
+        """Create a success response."""
+        return {
+            "success": True,
+            "data": data
+        }
+    
+    @classmethod
+    def error_response(
+        cls, 
+        message: str, 
+        details: Optional[ErrorDetail] = None,
+        status_code: int = HTTPStatus.INTERNAL_SERVER_ERROR
+    ) -> Dict[str, Any]:
+        """Create an error response."""
+        response = {
+            "success": False,
+            "error": message
+        }
+        
+        if details:
+            response["details"] = details
+            
+        return response
+
+
+class InvoiceResponse(BaseModel):
+    """Standardized response for invoice creation."""
+    payment_hash: str
+    payment_request: str
+    asset_id: str
+    asset_amount: int
+    satoshi_amount: int
+    checking_id: str
+
+
+class PaymentResponse(BaseModel):
+    """Standardized response for payment operations."""
+    success: bool
+    payment_hash: str
+    preimage: Optional[str] = None
+    fee_msat: Optional[int] = None
+    sat_fee_paid: Optional[int] = None
+    routing_fees_sats: Optional[int] = None
+    asset_amount: int
+    asset_id: Optional[str] = None
+    description: Optional[str] = None
+    internal_payment: Optional[bool] = False
+    status: str = "success"  # Can be "success" or "failed"
+    error: Optional[str] = None  # Error message if payment failed
+
+
+class ParsedInvoice(BaseModel):
+    """Model for parsed invoice data."""
+    payment_hash: str
+    amount: float
+    description: str
+    expiry: int
+    timestamp: int
+    valid: bool
+    asset_id: Optional[str] = None

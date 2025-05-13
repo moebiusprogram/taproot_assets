@@ -1,16 +1,35 @@
-<!-- /home/ubuntu/lnbits/lnbits/extensions/taproot_assets/templates/taproot_assets/index.html -->
 {% extends "base.html" %}
 {% from "macros.jinja" import window_vars with context %}
 
 {% block scripts %}
 {{ window_vars(user) }}
-<script src="{{ static_url_for('taproot_assets/static', path='js/index.js') }}"></script>
+<!-- Load CSS first -->
 <link rel="stylesheet" href="{{ static_url_for('taproot_assets/static', path='css/taproot_assets.css') }}" />
+
+<!-- Load consolidated DataUtils first - CORRECTED PATH -->
+<script src="{{ static_url_for('taproot_assets/static', path='js/services/data.utils.js') }}"></script>
+
+<!-- Load store before other services -->
+<script src="{{ static_url_for('taproot_assets/static', path='js/store.js') }}"></script>
+
+<!-- Load API services -->
+<script src="{{ static_url_for('taproot_assets/static', path='js/services/api.service.js') }}"></script>
+<script src="{{ static_url_for('taproot_assets/static', path='js/services/notification.service.js') }}"></script>
+
+<!-- Load domain services that use the store -->
+<script src="{{ static_url_for('taproot_assets/static', path='js/services/asset.service.js') }}"></script>
+<script src="{{ static_url_for('taproot_assets/static', path='js/services/invoice.service.js') }}"></script>
+<script src="{{ static_url_for('taproot_assets/static', path='js/services/payment.service.js') }}"></script>
+<script src="{{ static_url_for('taproot_assets/static', path='js/services/websocket.manager.js') }}"></script>
+
+<!-- Load main app file last -->
+<script src="{{ static_url_for('taproot_assets/static', path='js/index.js') }}"></script>
 {% endblock %}
 
 {% block page %}
 <div class="row q-col-gutter-md">
-  <div class="col-12 col-md-8 col-lg-7 q-gutter-y-md">
+  <div class="col-12 q-gutter-y-md">
+    <!-- Assets Card -->
     <q-card>
       <q-card-section>
         <div class="row items-center no-wrap q-mb-sm">
@@ -28,227 +47,447 @@
       </q-card-section>
 
       <q-card-section>
-        <div v-if="assets && assets.length === 0" class="text-center text-grey-6">
+        <div v-if="filteredAssets && filteredAssets.length === 0" class="text-center text-grey-6">
           No assets found. Connect to a Taproot Assets daemon in the settings.
         </div>
-        <div v-if="assets && assets.length > 0">
+        <div v-if="filteredAssets && filteredAssets.length > 0">
           <h6 class="text-subtitle1 q-my-none">Your Assets</h6>
           <q-separator class="q-my-sm"></q-separator>
-          <div v-for="asset in assets" :key="asset.name || asset.type" class="asset-card">
+          
+          <div v-for="asset in filteredAssets" :key="asset.asset_id || Math.random()" 
+               class="asset-card" :class="{'inactive-channel': asset.channel_info && asset.channel_info.active === false}">
             <div class="row items-center no-wrap">
               <div class="col">
-                <span class="asset-name">{% raw %}{{ asset.name ? asset.name : 'Unknown' }}{% endraw %}</span>
+                <span class="asset-name">{% raw %}{{ asset.name || 'Unknown' }}{% endraw %}</span>
+                <q-badge v-if="asset.channel_info && asset.channel_info.active === false" 
+                         color="grey" 
+                         class="q-ml-sm">Inactive</q-badge>
               </div>
               <div class="col-auto">
-                <q-btn flat color="primary" @click="openInvoiceDialog(asset)" class="q-mr-sm">
+                <q-btn flat color="primary" @click="openInvoiceDialog(asset)" class="q-mr-sm"
+                       :disabled="asset.channel_info && asset.channel_info.active === false">
                   <q-icon left name="arrow_upward"></q-icon>
                   RECEIVE
                 </q-btn>
-                <q-btn flat color="primary" @click="openPaymentDialog(asset)">
+                <q-btn flat color="primary" @click="openPaymentDialog(asset)"
+                       :disabled="(asset.channel_info && asset.channel_info.active === false) || !canSendAsset(asset)">
                   <q-icon left name="arrow_downward"></q-icon>
                   SEND
                 </q-btn>
               </div>
             </div>
             <div class="asset-detail">
-              <!-- Display balance information if available -->
-              <span v-if="asset.channel_info">
-                Balance: {% raw %}{{ asset.channel_info.local_balance }}{% endraw %}<br>
-                Channel Capacity: {% raw %}{{ asset.channel_info.capacity }}{% endraw %}
-                <span v-if="asset.channel_info.capacity && asset.channel_info.local_balance" class="text-positive">
-                  <br>Max Receivable: {% raw %}{{ parseFloat(asset.channel_info.capacity) - parseFloat(asset.channel_info.local_balance) }}{% endraw %}
-                </span>
-              </span>
-              <span v-else>
-                Amount: {% raw %}{{ asset.amount }}{% endraw %}
-              </span>
+              <div class="row q-col-gutter-md">
+                <div class="col-12">
+                  <div>Balance: {% raw %}{{ asset.user_balance || 0 }}{% endraw %}</div>
+                  <div v-if="asset.channel_info && asset.channel_info.capacity !== undefined && asset.channel_info.local_balance !== undefined" class="text-positive">
+                    Max Receivable: {% raw %}{{ parseFloat(asset.channel_info.capacity) - parseFloat(asset.channel_info.local_balance) }}{% endraw %}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </q-card-section>
     </q-card>
 
-    <!-- Transactions Table -->
+    <!-- Recent Transactions Card - Exact LNbits Copy -->
     <q-card>
-      <q-card-section>
-        <div class="row items-center no-wrap q-mb-sm">
+      <q-card-section class="q-pa-none">
+        <div class="row items-center q-px-md q-py-sm">
           <div class="col">
             <h5 class="text-subtitle1 q-my-none">Recent Transactions</h5>
           </div>
           <div class="col-auto">
-            <q-btn flat round dense icon="refresh" color="primary" @click="refreshTransactions">
-              <q-tooltip>Refresh</q-tooltip>
-            </q-btn>
-          </div>
-        </div>
-        <q-separator></q-separator>
-      </q-card-section>
-
-      <q-card-section>
-        <div v-if="transactionsLoading" class="text-center q-pa-md">
-          <q-spinner color="primary" size="2em" />
-          <div class="q-mt-sm text-grey">Loading transactions...</div>
-        </div>
-
-        <q-table
-          v-else
-          ref="transactionsTable"
-          flat
-          dense
-          :rows="combinedTransactions"
-          :columns="transactionsTable.columns"
-          row-key="id"
-          :pagination="transactionsTable.pagination"
-          class="invoices-table"
-        >
-          <!-- Date column -->
-          <template v-slot:body-cell-created_at="props">
-            <q-td :props="props">
-              {% raw %}{{ props.row.date }}{% endraw %}
-            </q-td>
-          </template>
-
-          <!-- Direction column - simple text like other table cells -->
-          <template v-slot:body-cell-direction="props">
-            <q-td :props="props">
-              {% raw %}{{ props.row.direction === 'incoming' ? 'RECEIVED' : 'SENT' }}{% endraw %}
-            </q-td>
-          </template>
-
-          <!-- Amount column -->
-          <template v-slot:body-cell-amount="props">
-            <q-td :props="props" class="text-right">
-              {% raw %}{{ props.row.asset_amount || props.row.extra?.asset_amount || '0' }}{% endraw %}
-            </q-td>
-          </template>
-
-          <!-- Status column -->
-          <template v-slot:body-cell-status="props">
-            <q-td :props="props">
-              <q-badge
-                :color="getStatusColor(props.row.status)"
-                :class="{'status-changed': props.row._statusChanged}"
-              >
-                {% raw %}{{ props.row.status }}{% endraw %}
-              </q-badge>
-            </q-td>
-          </template>
-
-          <!-- No data message -->
-          <template v-slot:no-data>
-            <div class="text-center text-grey-6 q-py-md">
-              No transactions found
-            </div>
-          </template>
-        </q-table>
-      </q-card-section>
-    </q-card>
-  </div>
-
-  <div class="col-12 col-md-4 col-lg-5">
-    <q-card v-if="invoiceDialog.show">
-      <q-card-section>
-        <h6 class="text-subtitle1 q-my-none text-white">Create Invoice</h6>
-        <q-separator class="q-my-sm"></q-separator>
-
-        <div class="invoice-form-container">
-          <div class="selected-asset-info" v-if="invoiceDialog.selectedAsset">
-            <div class="text-white">
-              <div>Selected asset:</div>
-              <div class="asset-name">{% raw %}{{ invoiceDialog.selectedAsset.name || 'Unknown' }}{% endraw %}</div>
-              <div class="asset-detail">
-                <!-- Show balance information if it's a channel asset -->
-                <span v-if="invoiceDialog.selectedAsset.channel_info">
-                  Balance: {% raw %}{{ invoiceDialog.selectedAsset.channel_info.local_balance }}{% endraw %}<br>
-                  Channel Capacity: {% raw %}{{ invoiceDialog.selectedAsset.channel_info.capacity }}{% endraw %}<br>
-                  <span class="text-positive">Max Receivable: {% raw %}{{ maxInvoiceAmount }}{% endraw %}</span>
-                </span>
-                <span v-else>
-                  Amount: {% raw %}{{ invoiceDialog.selectedAsset.amount }}{% endraw %}
-                </span>
-              </div>
+            <div class="row q-gutter-x-sm">
+              <q-btn flat round dense icon="calendar_today">
+                <q-popup-proxy cover transition-show="scale" transition-hide="scale">
+                  <q-date v-model="searchDate" mask="YYYY-MM-DD" range />
+                  <div class="row q-pa-sm">
+                    <q-btn label="Search" @click="searchByDate()" color="primary" flat class="col" v-close-popup />
+                    <q-btn v-close-popup @click="clearDateSearch()" label="Clear" class="col" color="grey" flat />
+                  </div>
+                </q-popup-proxy>
+                <q-badge v-if="searchDate?.to || searchDate?.from" class="q-mt-lg q-mr-md" color="primary" rounded floating style="border-radius: 6px" />
+              </q-btn>
+              <q-btn flat round dense icon="filter_list">
+                <q-tooltip>Filter</q-tooltip>
+              </q-btn>
+              <q-btn-dropdown flat round dense icon="more_vert">
+                <q-list>
+                  <q-item clickable v-close-popup @click="exportTransactionsCSV">
+                    <q-item-section avatar>
+                      <q-icon name="content_copy" />
+                    </q-item-section>
+                    <q-item-section>Export to CSV</q-item-section>
+                  </q-item>
+                  <q-item clickable v-close-popup @click="exportTransactionsCSVWithDetails">
+                    <q-item-section avatar>
+                      <q-icon name="list" />
+                    </q-item-section>
+                    <q-item-section>Export to CSV with details</q-item-section>
+                  </q-item>
+                </q-list>
+              </q-btn-dropdown>
+              <q-btn flat round dense icon="refresh" @click="refreshTransactions">
+                <q-tooltip>Refresh</q-tooltip>
+              </q-btn>
             </div>
           </div>
-          <div v-else class="text-light q-pa-sm">
-            No asset selected. Please click RECEIVE on an asset.
-          </div>
+        </div>
+        <q-separator />
+      </q-card-section>
 
-          <form @submit.prevent="submitInvoiceForm" class="invoice-form">
-            <div class="invoice-form-row">
-              <div class="invoice-form-col">
-                <label class="invoice-input-label">Amount</label>
-                <input v-model.number="invoiceDialog.form.amount" type="number" min="0.000001" step="0.000001" class="invoice-input" required
-                       :max="maxInvoiceAmount" />
-                <div class="text-negative" v-if="!isInvoiceAmountValid">
-                  <small>Amount exceeds maximum receivable</small>
+      <div v-if="transactionsLoading" class="text-center q-pa-md">
+        <q-spinner color="primary" size="2em" />
+        <div class="q-mt-sm text-grey">Loading transactions...</div>
+      </div>
+
+      <div v-else class="q-pa-none">
+        <table class="lnbits-transactions-table">
+          <thead>
+            <tr>
+              <th class="type-col"></th>
+              <th class="date-col">Date</th>
+              <th class="asset-col">Asset</th>
+              <th class="memo-col">Memo</th>
+              <th class="amount-col">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="filteredTransactions.length === 0">
+              <td colspan="5" class="text-center q-py-lg">
+                <q-icon name="warning" color="warning" size="sm" class="q-mr-xs"></q-icon>
+                No data available
+              </td>
+            </tr>
+            <tr v-for="tx in filteredTransactions" :key="tx.id" :class="{'status-changed': tx._statusChanged, 'new-transaction': tx._isNew}">
+              <td class="type-col">
+                <q-icon
+                  v-if="tx.status === 'pending'"
+                  name="downloading"
+                  :style="tx.direction === 'outgoing' ? 'transform: rotate(225deg)' : 'transform: scaleX(-1) rotate(315deg)'"
+                  color="grey"
+                  class="cursor-pointer"
+                >
+                  <q-tooltip>pending</q-tooltip>
+                </q-icon>
+                <q-icon
+                  v-else
+                  :name="tx.direction === 'incoming' ? 'call_received' : 'call_made'"
+                  :color="tx.direction === 'incoming' ? 'green' : 'pink'"
+                  class="cursor-pointer"
+                ></q-icon>
+              </td>
+              <td class="date-col">
+                <q-tooltip>{% raw %}{{ formatTransactionDate(tx.created_at) }}{% endraw %}</q-tooltip>
+                {% raw %}{{ tx.timeFrom }}{% endraw %}
+              </td>
+              <td class="asset-col">
+                {% raw %}{{ getAssetNameFromId(tx.asset_id) || 'Unknown' }}{% endraw %}
+              </td>
+              <td class="memo-col">
+                <div class="ellipsis">{% raw %}{{ tx.memo || '' }}{% endraw %}</div>
+              </td>
+              <td class="amount-col text-right">
+                {% raw %}{{ tx.asset_amount || tx.extra?.asset_amount || '0' }}{% endraw %}
+              </td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="5">
+                <div class="row justify-between items-center q-px-sm">
+                  <div>
+                    Records per page:
+                    <q-select
+                      v-model="transactionsTable.pagination.rowsPerPage"
+                      :options="[10, 25, 50, 100]"
+                      dense
+                      borderless
+                      emit-value
+                      map-options
+                      options-dense
+                      style="min-width: 70px; display: inline-block"
+                    />
+                  </div>
+                  <div>
+                    {% raw %}{{ paginationLabel }}{% endraw %}
+                  </div>
+                  <div>
+                    <q-pagination
+                      v-model="transactionsTable.pagination.page"
+                      :max="Math.ceil(filteredTransactions.length / transactionsTable.pagination.rowsPerPage) || 1"
+                      :max-pages="6"
+                      direction-links
+                      boundary-links
+                      dense
+                      size="sm"
+                      @update:model-value="applyFilters"
+                    />
+                  </div>
                 </div>
-              </div>
-              <div class="invoice-form-col">
-                <label class="invoice-input-label">Memo (optional)</label>
-                <input v-model="invoiceDialog.form.memo" type="text" class="invoice-input" />
-              </div>
-              <div class="invoice-form-col">
-                <label class="invoice-input-label">Expiry (seconds)</label>
-                <input v-model.number="invoiceDialog.form.expiry" type="number" min="1" class="invoice-input" />
-              </div>
-            </div>
-
-            <div class="invoice-button-container">
-              <div class="invoice-buttons">
-                <button type="submit" class="create-invoice-btn"
-                        :disabled="!invoiceDialog.selectedAsset || !isInvoiceAmountValid || isSubmitting">
-                  {% raw %}{{ isSubmitting ? 'CREATING...' : 'CREATE INVOICE' }}{% endraw %}
-                </button>
-                <button type="button" class="cancel-btn" @click="closeInvoiceDialog()">CANCEL</button>
-              </div>
-            </div>
-          </form>
-        </div>
-      </q-card-section>
-    </q-card>
-
-    <q-card v-if="createdInvoice" class="q-mt-md">
-      <q-card-section>
-        <h6 class="text-subtitle1 q-my-none text-white">Invoice Created</h6>
-        <q-separator class="q-my-sm"></q-separator>
-
-        <div class="invoice-created-container">
-          <div class="row items-center">
-            <div class="col">
-              <div class="invoice-label">Asset:</div>
-              <div class="invoice-value">{% raw %}{{ createdInvoice.asset_name || (invoiceDialog.selectedAsset ? invoiceDialog.selectedAsset.name : '') }}{% endraw %}</div>
-            </div>
-            <div class="col-auto">
-              <q-btn flat round dense icon="content_copy" size="lg" color="purple-3" @click="copyInvoice(createdInvoice.payment_request || createdInvoice.id)" />
-            </div>
-          </div>
-
-          <div class="invoice-amount-row">
-            <div>
-              <div class="invoice-label">Asset Amount:</div>
-              <div class="invoice-value">{% raw %}{{ invoiceDialog.form.amount || createdInvoice.asset_amount }}{% endraw %}</div>
-            </div>
-            <div>
-              <div class="invoice-label">Protocol Fee:</div>
-              <div class="invoice-value">{% raw %}{{ createdInvoice.satoshi_amount }}{% endraw %} sats</div>
-            </div>
-          </div>
-
-          <div class="mt-4">
-            <div class="invoice-label">Invoice:</div>
-            <div class="full-invoice">
-              {% raw %}{{ createdInvoice.payment_request || createdInvoice.id }}{% endraw %}
-            </div>
-          </div>
-        </div>
-      </q-card-section>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </q-card>
   </div>
 </div>
 
-<!-- Send payment modal -->
-<q-dialog v-model="paymentDialog.show">
-  <q-card class="q-pa-lg q-pt-xl" style="min-width: 500px">
+<!-- Invoice dialog popup - Styled like LNbits -->
+<q-dialog v-model="invoiceDialog.show" position="top">
+  <q-card class="q-pa-sm q-pt-xl lnbits__dialog-card" style="width: 100%; max-width: 500px;">
+    <q-card-section>
+      <div v-if="invoiceDialog.selectedAsset" class="text-center q-mb-xl">
+        <div class="text-h6">{% raw %}{{ invoiceDialog.selectedAsset.name || 'Unknown' }}{% endraw %}</div>
+      </div>
+
+      <q-form @submit="submitInvoiceForm" class="q-gutter-md">
+        <q-input
+          filled
+          dense
+          v-model.number="invoiceDialog.form.amount"
+          type="number"
+          label="Amount"
+          :rules="[val => val > 0 || 'Please enter an amount']"
+          :hint="invoiceDialog.selectedAsset.channel_info && invoiceDialog.selectedAsset.channel_info.capacity !== undefined ? 'Max Receivable: ' + maxInvoiceAmount : ''"
+          :error="!isInvoiceAmountValid"
+          :error-message="!isInvoiceAmountValid ? 'Amount exceeds maximum receivable' : ''"
+        ></q-input>
+        
+        <q-input
+          filled
+          dense
+          v-model="invoiceDialog.form.memo"
+          label="Memo (optional)"
+        ></q-input>
+        
+        <div class="row q-mt-lg">
+          <q-btn
+            unelevated
+            color="primary"
+            :disable="!invoiceDialog.selectedAsset || !isInvoiceAmountValid || isSubmitting"
+            type="submit"
+            :label="isSubmitting ? 'CREATING...' : 'CREATE INVOICE'"
+            class="full-width q-mb-sm"
+          ></q-btn>
+          <q-btn
+            flat
+            color="grey"
+            label="CANCEL"
+            class="full-width"
+            @click="closeInvoiceDialog()"
+          ></q-btn>
+        </div>
+      </q-form>
+    </q-card-section>
+  </q-card>
+</q-dialog>
+
+<!-- Created Invoice Dialog with QR Code - Styled like LNbits -->
+<q-dialog v-model="createdInvoiceDialog.show" position="top">
+  <q-card class="q-pa-sm q-pt-xl lnbits__dialog-card" style="width: 100%; max-width: 450px;">
+    <q-card-section class="">
+      <div v-if="createdInvoice">
+        <!-- QR Code at the top -->
+        <div class="text-center">
+          <a :href="'lightning:' + createdInvoice.payment_request">
+            <lnbits-qrcode 
+              :value="'lightning:' + createdInvoice.payment_request" 
+              :options="{
+                width: 350,
+                margin: 4,
+                level: 'Q'
+              }"
+            ></lnbits-qrcode>
+          </a>
+        </div>
+        
+        <!-- Asset and Amount info below QR code -->
+        <div class="text-center q-mt-md">
+          <div class="text-subtitle1">
+            <div class="q-mb-sm"><span class="text-bold">Asset:</span> {% raw %}{{ createdInvoice.asset_name || (invoiceDialog.selectedAsset ? invoiceDialog.selectedAsset.name : 'Unknown') }}{% endraw %}</div>
+            <div><span class="text-bold">Amount:</span> {% raw %}{{ invoiceDialog.form.amount || createdInvoice.asset_amount }}{% endraw %} units</div>
+          </div>
+        </div>
+        
+        <!-- Action buttons - Exact LNbits style -->
+        <div class="row q-mt-lg">
+          <q-btn 
+            outline
+            color="grey" 
+            @click="copyInvoice(createdInvoice)"
+            label="Copy Invoice"
+          ></q-btn>
+          <q-btn
+            v-close-popup
+            flat
+            color="grey"
+            class="q-ml-auto"
+            label="Close"
+          ></q-btn>
+        </div>
+      </div>
+    </q-card-section>
+  </q-card>
+</q-dialog>
+
+<!-- Read invoice dialog - Step 1 -->
+<q-dialog v-model="parseDialog.show" position="top">
+  <q-card class="q-pa-lg q-pt-xl lnbits__dialog-card" style="width: 100%; max-width: 500px">
+    <div v-if="!parseDialog.invoice">
+      <q-form @submit="decodeInvoice" class="q-gutter-md">
+        <q-input
+          filled
+          dense
+          v-model.trim="parseDialog.data.request"
+          type="textarea"
+          label="Paste invoice"
+          ref="invoiceTextArea"
+        >
+        </q-input>
+        <div class="row q-mt-lg">
+          <q-btn
+            unelevated
+            color="primary"
+            :disable="parseDialog.data.request == ''"
+            type="submit"
+            label="Read"
+          ></q-btn>
+          <q-icon
+            name="content_paste"
+            color="grey"
+            class="q-mt-xs q-ml-sm q-mr-auto"
+            v-if="parseDialog.copy.show"
+            @click="pasteToTextArea"
+          >
+            <q-tooltip>
+              <span>Paste from clipboard</span>
+            </q-tooltip>
+          </q-icon>
+          <q-btn
+            v-close-popup
+            flat
+            color="grey"
+            class="q-ml-auto"
+            label="Cancel"
+          ></q-btn>
+        </div>
+      </q-form>
+    </div>
+    <div v-else>
+      <div class="column content-center text-center q-mb-md">
+        <h4 class="q-my-none text-bold">
+          <span>{% raw %}{{ parseDialog.invoice.amount }}{% endraw %}</span>
+          <span class="text-subtitle1 q-ml-sm">{% raw %}{{ getAssetNameFromId(parseDialog.invoice.asset_id) || 'Unknown Asset' }}{% endraw %}</span>
+        </h4>
+      </div>
+      <q-separator></q-separator>
+      <h6 class="text-center">{% raw %}{{ parseDialog.invoice.description }}{% endraw %}</h6>
+      <q-list separator bordered dense class="q-mb-md">
+        <q-expansion-item expand-separator icon="info" label="Details">
+          <q-list separator>
+            <q-item>
+              <q-item-section>
+                <q-item-label>Created</q-item-label>
+                <q-item-label caption>{% raw %}{{ parseDialog.invoice.createdDate }}{% endraw %}</q-item-label>
+              </q-item-section>
+              <q-item-section side top>
+                <q-item-label caption>{% raw %}{{ parseDialog.invoice.createdDateFrom }}{% endraw %}</q-item-label>
+              </q-item-section>
+            </q-item>
+            <q-item>
+              <q-item-section>
+                <q-item-label>Expire date</q-item-label>
+                <q-item-label caption>{% raw %}{{ parseDialog.invoice.expireDate }}{% endraw %}</q-item-label>
+              </q-item-section>
+              <q-item-section side top>
+                <q-item-label caption>{% raw %}{{ parseDialog.invoice.expireDateFrom }}{% endraw %}</q-item-label>
+              </q-item-section>
+            </q-item>
+            <q-item>
+              <q-item-section>
+                <q-item-label>Payment hash</q-item-label>
+                <q-item-label caption>{% raw %}{{ `${parseDialog.invoice.hash.slice(0, 12)}...${parseDialog.invoice.hash.slice(-12)}` }}{% endraw %}</q-item-label>
+              </q-item-section>
+              <q-item-section side>
+                <q-item-label>
+                  <q-icon
+                    name="content_copy"
+                    @click="copyText(parseDialog.invoice.hash)"
+                    size="1em"
+                    color="grey"
+                    class="cursor-pointer"
+                  />
+                </q-item-label>
+                <q-tooltip>
+                  <span>{% raw %}{{ parseDialog.invoice.hash }}{% endraw %}</span>
+                </q-tooltip>
+              </q-item-section>
+            </q-item>
+            <q-item>
+              <q-item-section>
+                <q-item-label>Invoice</q-item-label>
+                <q-item-label caption>{% raw %}{{ `${parseDialog.invoice.bolt11.slice(0, 12)}...${parseDialog.invoice.bolt11.slice(-12)}` }}{% endraw %}</q-item-label>
+              </q-item-section>
+              <q-item-section side>
+                <q-item-label>
+                  <q-icon
+                    name="content_copy"
+                    @click="copyText(parseDialog.invoice.bolt11)"
+                    size="1em"
+                    color="grey"
+                    class="cursor-pointer"
+                  />
+                </q-item-label>
+                <q-tooltip>
+                  <span>{% raw %}{{ parseDialog.invoice.bolt11 }}{% endraw %}</span>
+                </q-tooltip>
+              </q-item-section>
+            </q-item>
+          </q-list>
+        </q-expansion-item>
+      </q-list>
+      <div v-if="canPay" class="row q-mt-lg">
+        <q-btn
+          unelevated
+          color="primary"
+          @click="payInvoice"
+          label="Pay"
+        ></q-btn>
+        <q-btn
+          v-close-popup
+          flat
+          color="grey"
+          class="q-ml-auto"
+          label="Cancel"
+        ></q-btn>
+      </div>
+      <div v-else class="row q-mt-lg">
+        <q-btn
+          label="Not enough funds"
+          unelevated
+          disabled
+          color="yellow"
+          text-color="black"
+        ></q-btn>
+        <q-btn
+          v-close-popup
+          flat
+          color="grey"
+          class="q-ml-auto"
+          label="Cancel"
+        ></q-btn>
+      </div>
+    </div>
+  </q-card>
+</q-dialog>
+
+<!-- Send payment modal - Step 2 (now only used for asset selection) -->
+<q-dialog v-model="paymentDialog.show" position="top">
+  <q-card class="q-pa-sm q-pt-xl lnbits__dialog-card" style="width: 100%; max-width: 500px">
     <q-card-section>
       <div class="text-h6">Pay Taproot Asset Invoice</div>
     </q-card-section>
@@ -256,62 +495,84 @@
     <q-card-section>
       <div v-if="paymentDialog.selectedAsset" class="q-mb-md">
         <div>Selected asset: <strong>{% raw %}{{ paymentDialog.selectedAsset.name || 'Unknown' }}{% endraw %}</strong></div>
-        <div v-if="paymentDialog.selectedAsset.channel_info">
-          <div>Balance: {% raw %}{{ paymentDialog.selectedAsset.channel_info.local_balance }}{% endraw %}</div>
+        
+        <div class="row q-col-gutter-md q-mt-sm">
+          <div class="col-12">
+            <div>Balance: {% raw %}{{ paymentDialog.selectedAsset.user_balance || 0 }}{% endraw %}</div>
+          </div>
         </div>
       </div>
 
-      <q-form @submit="submitPaymentForm" class="q-gutter-md">
-        <q-input
-          filled
-          v-model="paymentDialog.form.paymentRequest"
-          label="Paste invoice"
-          :rules="[val => !!val || 'Invoice is required']"
-        ></q-input>
-
-        <q-input
-          filled
-          v-model.number="paymentDialog.form.feeLimit"
-          type="number"
-          label="Fee limit (sats)"
-          :rules="[val => val > 0 || 'Fee limit must be greater than 0']"
-        ></q-input>
-
-        <div class="row justify-end q-mt-md">
-          <q-btn
-            flat
-            color="grey"
-            @click="closePaymentDialog"
-            class="q-mr-sm"
-          >
-            Cancel
-          </q-btn>
-          <q-btn
-            :loading="paymentDialog.inProgress"
-            color="primary"
-            type="submit"
-          >
-            Pay Invoice
-          </q-btn>
+      <div class="text-center q-pa-md">
+        <p>Click the button below to paste or scan an invoice</p>
+        <div class="row q-col-gutter-sm q-mt-md">
+          <div class="col-12">
+            <q-btn
+              unelevated
+              color="primary"
+              @click="showParseDialog"
+              class="full-width q-mb-md"
+              style="height: 40px;"
+            >
+              <q-icon left name="file_upload"></q-icon>
+              Paste Invoice
+            </q-btn>
+            <q-btn
+              unelevated
+              color="secondary"
+              @click="showCamera"
+              class="full-width"
+              style="height: 40px;"
+            >
+              <q-icon left name="qr_code_scanner"></q-icon>
+              Scan QR Code
+            </q-btn>
+          </div>
         </div>
-      </q-form>
+      </div>
     </q-card-section>
+    
+    <q-card-actions align="right">
+      <q-btn flat label="Cancel" color="grey" v-close-popup />
+    </q-card-actions>
   </q-card>
 </q-dialog>
 
-<!-- Payment success dialog -->
-<q-dialog v-model="successDialog.show" @hide="getAssets(); refreshTransactions();">
-  <q-card class="q-pa-lg">
+<!-- Payment success dialog - Styled like LNbits -->
+<q-dialog v-model="successDialog.show" position="top" @hide="getAssets(); refreshTransactions();">
+  <q-card class="q-pa-sm q-pt-xl lnbits__dialog-card" style="width: 100%; max-width: 500px;">
     <q-card-section class="row items-center">
       <q-avatar icon="check_circle" color="positive" text-color="white" />
-      <span class="q-ml-sm text-h6">Payment Successful!</span>
+      <span class="q-ml-sm text-h6">{% raw %}{{ successDialog.title }}{% endraw %}</span>
     </q-card-section>
     <q-card-section>
-      Payment has been sent successfully.
+      {% raw %}{{ successDialog.message }}{% endraw %}
     </q-card-section>
-    <q-card-actions align="right">
-      <q-btn flat label="Close" color="primary" v-close-popup />
+    <q-card-actions align="center">
+      <q-btn flat label="Close" color="primary" class="full-width" style="height: 40px;" v-close-popup />
     </q-card-actions>
+  </q-card>
+</q-dialog>
+
+<!-- Camera overlay for QR code scanning -->
+<q-dialog v-model="camera.show" position="top">
+  <q-card class="q-pa-sm q-pt-xl lnbits__dialog-card" style="width: 100%; max-width: 500px;">
+    <q-card-section class="row items-center">
+      <div class="text-h6">Scan QR Code</div>
+      <q-space></q-space>
+      <q-btn icon="close" flat round dense v-close-popup></q-btn>
+    </q-card-section>
+    <q-card-section class="q-pa-none">
+      <div class="row justify-center">
+        <div class="col-12">
+          <qrcode-stream 
+            @detect="onDecode" 
+            @camera-on="onInit" 
+            class="rounded-borders"
+          ></qrcode-stream>
+        </div>
+      </div>
+    </q-card-section>
   </q-card>
 </q-dialog>
 {% endblock %}
