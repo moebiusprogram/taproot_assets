@@ -102,6 +102,7 @@ class InvoiceService:
                     wallet_id=wallet_id,
                     description=data.description or "",
                     expiry=data.expiry,
+                    extra=data.extra,
                     conn=conn
                 )
 

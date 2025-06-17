@@ -22,6 +22,7 @@ async def create_invoice(
     wallet_id: str,
     description: Optional[str] = None,
     expiry: Optional[int] = None,
+    extra: Optional[dict] = None,
     conn=None
 ) -> TaprootInvoice:
     """
@@ -60,7 +61,8 @@ async def create_invoice(
         wallet_id=wallet_id,
         created_at=now,
         expires_at=expires_at,
-        paid_at=None
+        paid_at=None,
+        extra=extra
     )
     
     # Insert using standardized method

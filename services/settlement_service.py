@@ -926,6 +926,18 @@ class SettlementService:
                 }
             )
             
+            # Emit cross-extension event if invoice has extra metadata
+            if invoice.extra:
+                from .cross_extension_service import CrossExtensionService
+                await CrossExtensionService.emit_taproot_payment_event(
+                    payment_hash=invoice.payment_hash,
+                    asset_id=invoice.asset_id,
+                    asset_amount=invoice.asset_amount,
+                    satoshi_amount=invoice.satoshi_amount,
+                    extra=invoice.extra,
+                    wallet_id=invoice.wallet_id
+                )
+            
             # Get updated assets for notifications
             try:
                 # Get assets with channel info

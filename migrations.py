@@ -252,3 +252,21 @@ async def m006_add_asset_indexes(db):
 
 
 # No migration needed to rename memo to description since we're using description from the start
+
+
+async def m007_add_extra_to_invoices(db):
+    """Add extra field to invoices table for cross-extension metadata."""
+    try:
+        invoices_table = get_table_name("invoices")
+        
+        await db.execute(
+            f"""
+            ALTER TABLE {invoices_table}
+            ADD COLUMN extra TEXT;
+            """
+        )
+        
+        logger.info("Added extra column to invoices table for cross-extension support")
+    except Exception as e:
+        # Column might already exist
+        logger.warning(f"Error in migration m007_add_extra_to_invoices: {str(e)}")

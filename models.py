@@ -33,6 +33,7 @@ class TaprootInvoiceRequest(BaseModel):
     description: Optional[str] = None
     expiry: Optional[int] = None
     peer_pubkey: Optional[str] = None  # Add peer_pubkey parameter for multi-channel support
+    extra: Optional[dict] = None  # Store metadata from other extensions
 
 
 class TaprootPaymentRequest(BaseModel):
@@ -58,6 +59,7 @@ class TaprootInvoice(BaseModel):
     created_at: datetime
     expires_at: Optional[datetime] = None
     paid_at: Optional[datetime] = None
+    extra: Optional[dict] = None  # Store metadata from other extensions
 
 
 class TaprootPayment(BaseModel):
