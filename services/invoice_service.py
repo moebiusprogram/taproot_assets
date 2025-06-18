@@ -71,8 +71,9 @@ class InvoiceService:
                 from lnbits.core.models import WalletTypeInfo, Wallet
                 
                 # Create wallet info for asset lookup
+                from lnbits.core.models.wallets import KeyType
                 wallet_obj = Wallet(id=wallet_id, user=user_id, adminkey="", inkey="", balance_msat=0, name="")
-                wallet_info = WalletTypeInfo(wallet=wallet_obj, wallet_type=0)
+                wallet_info = WalletTypeInfo(key_type=KeyType.admin, wallet=wallet_obj)
                 
                 # Get user's assets
                 assets = await AssetService.list_assets(wallet_info)
