@@ -61,13 +61,42 @@ class InvoiceService:
             # Add detailed logging before creating invoice
             logger.info(f"[{API}] Creating raw invoice with: asset_id={data.asset_id}, amount={data.amount}, peer={data.peer_pubkey}")
             
+            # If no peer specified, find one with an asset channel
+            peer_pubkey = data.peer_pubkey
+            if peer_pubkey is None:
+                logger.info(f"[{API}] No peer specified, looking for available asset channels")
+                
+                # Use our own AssetService to find the peer
+                from .asset_service import AssetService
+                from lnbits.core.models import WalletTypeInfo, Wallet
+                
+                # Create wallet info for asset lookup
+                wallet_obj = Wallet(id=wallet_id, user=user_id, adminkey="", inkey="", balance_msat=0, name="")
+                wallet_info = WalletTypeInfo(wallet=wallet_obj, wallet_type=0)
+                
+                # Get user's assets
+                assets = await AssetService.list_assets(wallet_info)
+                
+                # Find the asset with a channel
+                for asset in assets:
+                    if asset.get("asset_id") == data.asset_id and asset.get("channel_info") and asset["channel_info"].get("peer_pubkey"):
+                        peer_pubkey = asset["channel_info"]["peer_pubkey"]
+                        logger.info(f"[{API}] Found asset channel with peer {peer_pubkey[:16]}...")
+                        break
+                
+                if peer_pubkey is None:
+                    raise_http_exception(
+                        status_code=HTTPStatus.BAD_REQUEST,
+                        detail=f"No channel found for asset {data.asset_id}. Please open a channel with this asset first."
+                    )
+            
             # Get raw node invoice using the wallet's low-level method
             invoice_result = await taproot_wallet.get_raw_node_invoice(
                 description=data.description or "",
                 asset_id=data.asset_id,
                 asset_amount=data.amount,
                 expiry=data.expiry,
-                peer_pubkey=data.peer_pubkey
+                peer_pubkey=peer_pubkey
             )
             
             # Log the result

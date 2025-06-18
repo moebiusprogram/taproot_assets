@@ -554,6 +554,43 @@ window.app = Vue.createApp({
         // Use PaymentService to parse invoice
         const parsedInvoice = await PaymentService.parseInvoice(wallet, this.parseDialog.data.request);
         
+        // Check if this is an LNURL
+        if (parsedInvoice.is_lnurl) {
+          // LNURL already fetched and parsed the taproot asset invoice
+          // Display it like a normal invoice but with asset info
+          this.parseDialog.invoice = {
+            amount: parsedInvoice.amount || 0,
+            description: parsedInvoice.description || 'LNURL Payment',
+            hash: parsedInvoice.payment_hash || '',
+            bolt11: this.parseDialog.data.request, // Keep original LNURL for reference
+            createdDate: DataUtils.formatDate(parsedInvoice.timestamp * 1000),
+            createdDateFrom: DataUtils.getRelativeTime(parsedInvoice.timestamp * 1000),
+            expireDate: DataUtils.formatDate((parsedInvoice.timestamp + parsedInvoice.expiry) * 1000),
+            expireDateFrom: DataUtils.getRelativeTime((parsedInvoice.timestamp + parsedInvoice.expiry) * 1000),
+            asset_id: parsedInvoice.asset_id || '',
+            // Add LNURL-specific info
+            is_lnurl: true,
+            lnurl_string: parsedInvoice.lnurl_string,
+            asset_info: parsedInvoice.asset_info,
+            lnurl_params: parsedInvoice.lnurl_params
+          };
+          
+          // Store the actual payment request from the callback
+          this.paymentDialog.form.paymentRequest = parsedInvoice.lnurl_string;
+          this.paymentDialog.form.amount = parsedInvoice.amount || 0;
+          
+          // Pre-select the asset if available
+          if (parsedInvoice.asset_info) {
+            const asset = this.assets.find(a => a.asset_id === parsedInvoice.asset_info.asset_id);
+            if (asset) {
+              this.paymentDialog.selectedAsset = asset;
+              NotificationService.showInfo(`LNURL Payment: ${parsedInvoice.amount} ${parsedInvoice.asset_info.asset_name}`);
+            }
+          }
+          
+          return;
+        }
+        
         // Format the invoice data for display
         this.parseDialog.invoice = {
           amount: parsedInvoice.amount || 0,
@@ -582,6 +619,7 @@ window.app = Vue.createApp({
       }
     },
     
+    
   // Pay invoice from parse dialog
   async payInvoice() {
     if (!this.parseDialog.invoice || !this.paymentDialog.selectedAsset) {
@@ -597,6 +635,49 @@ window.app = Vue.createApp({
       // Close both dialogs immediately
       this.parseDialog.show = false;
       this.paymentDialog.show = false;
+      
+      // Check if this is an LNURL payment
+      if (this.parseDialog.invoice.is_lnurl) {
+        // For LNURL, we need to use the LNURL pay endpoint
+        const paymentData = {
+          lnurl: this.parseDialog.invoice.lnurl_string,
+          amount_msat: this.parseDialog.invoice.amount * 1000, // Asset amount to millisats
+          asset_id: this.paymentDialog.selectedAsset.asset_id,
+          fee_limit_sats: this.paymentDialog.form.feeLimit || 100
+        };
+        
+        const response = await LNbits.api.request(
+          'POST',
+          '/taproot_assets/api/v1/taproot/lnurl/pay',
+          wallet.adminkey,
+          paymentData
+        );
+        
+        if (!response.data) {
+          throw new Error('No response from server');
+        }
+        
+        if (response.data.success) {
+          const assetName = this.paymentDialog.selectedAsset.name;
+          NotificationService.showSuccess(`LNURL payment sent: ${response.data.asset_amount} ${assetName}`);
+          
+          // Handle success action if present
+          if (response.data.lnurl_success_action) {
+            const action = response.data.lnurl_success_action;
+            if (action.tag === 'message') {
+              NotificationService.showInfo(action.message);
+            } else if (action.tag === 'url') {
+              window.open(action.url, '_blank');
+            }
+          }
+          
+          this.refreshData();
+        } else {
+          throw new Error(response.data.error || 'Payment failed');
+        }
+        
+        return;
+      }
       
       // Use PaymentService to pay invoice
       const paymentResult = await PaymentService.payInvoice(

@@ -258,13 +258,15 @@ class PaymentService:
                 
             # Make the payment using the low-level wallet method
             # This only handles the direct node communication
-            log_info(PAYMENT, f"Making external payment, fee_limit_sats={fee_limit_sats}")
+            log_info(PAYMENT, f"Making external payment, fee_limit_sats={fee_limit_sats}, invoice_amount={parsed_invoice.amount}")
             payment_result = await taproot_wallet.send_raw_payment(
                 payment_request=data.payment_request,
                 fee_limit_sats=fee_limit_sats,
                 asset_id=asset_id_to_use,
                 peer_pubkey=data.peer_pubkey
             )
+            
+            log_info(PAYMENT, f"Raw payment result: {payment_result}")
 
             # Verify payment success
             if "status" in payment_result and payment_result["status"] != "success":
@@ -284,6 +286,8 @@ class PaymentService:
             preimage = payment_result.get("payment_preimage", "")
             routing_fees_sats = payment_result.get("fee_sats", 0)
             
+            log_info(PAYMENT, f"Payment details: hash={payment_hash}, preimage={preimage}, fee={routing_fees_sats}")
+            
             # Use the client-provided asset_id for recording the payment
             asset_id = data.asset_id if data.asset_id else ""
             log_info(PAYMENT, f"Using asset_id={asset_id} for recording payment")
@@ -294,6 +298,8 @@ class PaymentService:
             # Use the unified process_payment_settlement method
             # Add a small delay to allow any pending transactions to complete
             await asyncio.sleep(0.5)
+            
+            log_info(PAYMENT, f"Processing settlement: amount={parsed_invoice.amount}, asset_id={asset_id}")
             
             success, settlement_result = await SettlementService.process_payment_settlement(
                 payment_hash=payment_hash,
@@ -309,8 +315,10 @@ class PaymentService:
                 is_self_payment=False
             )
             
+            log_info(PAYMENT, f"Settlement result: success={success}, result={settlement_result}")
+            
             if not success:
-                log_warning(PAYMENT, "Payment was successful but failed to record in database")
+                log_warning(PAYMENT, f"Payment was successful but failed to record in database: {settlement_result}")
             
             # Return success response
             return PaymentResponse(

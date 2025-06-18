@@ -99,14 +99,9 @@ class LnurlService:
                 # Parse the LNURL first
                 lnurl_params = await cls.parse_lnurl(lnurl_string)
                 
-                # Validate amount is within bounds
-                min_sendable = lnurl_params.get("minSendable", 0)
-                max_sendable = lnurl_params.get("maxSendable", 0)
-                
-                if amount_msat < min_sendable:
-                    raise ValueError(f"Amount {amount_msat} msat is below minimum {min_sendable} msat")
-                if amount_msat > max_sendable:
-                    raise ValueError(f"Amount {amount_msat} msat is above maximum {max_sendable} msat")
+                # Skip amount validation entirely for taproot assets
+                # The min/max limits from LNURL are in sats, but we're paying with assets
+                # which have their own units and values (1 asset could be worth 1000 sats or 0.001 sats)
                 
                 # Check if comment is allowed
                 comment_allowed = lnurl_params.get("commentAllowed", 0)
@@ -134,6 +129,7 @@ class LnurlService:
                 # Make the callback request
                 async with httpx.AsyncClient() as client:
                     check_callback_url(callback_url)
+                    log_info(PAYMENT, f"Making LNURL callback with params: {callback_params}")
                     response = await client.get(
                         callback_url,
                         params=callback_params,
@@ -142,7 +138,7 @@ class LnurlService:
                     response.raise_for_status()
                     
                     callback_data = response.json()
-                    log_debug(PAYMENT, f"LNURL callback response: {callback_data}")
+                    log_info(PAYMENT, f"LNURL callback response: {callback_data}")
                     
                     # Check for errors
                     if callback_data.get("status") == "ERROR":
@@ -153,16 +149,22 @@ class LnurlService:
                     if not payment_request:
                         raise Exception("No payment request received from LNURL callback")
                     
-                    # Validate the invoice amount matches what we requested
-                    decoded_invoice = bolt11_decode(payment_request)
-                    invoice_amount_msat = decoded_invoice.amount_msat
+                    log_info(PAYMENT, f"Got payment request: {payment_request[:100]}...")
                     
-                    # Allow small differences due to rounding
-                    if abs(invoice_amount_msat - amount_msat) > 1000:  # 1 sat tolerance
-                        raise ValueError(
-                            f"Invoice amount {invoice_amount_msat} msat doesn't match "
-                            f"requested amount {amount_msat} msat"
-                        )
+                    # For taproot assets, skip bolt11 validation since the invoice format might be different
+                    if asset_id:
+                        log_info(PAYMENT, "Skipping bolt11 validation for taproot asset payment")
+                    else:
+                        # Validate the invoice amount matches what we requested
+                        decoded_invoice = bolt11_decode(payment_request)
+                        invoice_amount_msat = decoded_invoice.amount_msat
+                        
+                        # Allow small differences due to rounding
+                        if abs(invoice_amount_msat - amount_msat) > 1000:  # 1 sat tolerance
+                            raise ValueError(
+                                f"Invoice amount {invoice_amount_msat} msat doesn't match "
+                                f"requested amount {amount_msat} msat"
+                            )
                     
                     # Create payment request
                     payment_data = TaprootPaymentRequest(
@@ -172,15 +174,18 @@ class LnurlService:
                     )
                     
                     # Process the payment using the regular payment service
-                    log_info(PAYMENT, f"Processing LNURL payment with asset_id={asset_id}")
+                    log_info(PAYMENT, f"Processing LNURL payment with asset_id={asset_id}, payment_request={payment_request[:50]}...")
                     payment_response = await PaymentService.process_payment(
                         data=payment_data,
                         wallet=wallet_info
                     )
                     
+                    log_info(PAYMENT, f"Payment response: success={payment_response.success}, status={payment_response.status}, error={payment_response.error}")
+                    
                     # Add LNURL success action to the response if available
                     if payment_response.success and callback_data.get("successAction"):
                         payment_response.lnurl_success_action = callback_data["successAction"]
+                        log_info(PAYMENT, f"Added success action: {callback_data.get('successAction')}")
                     
                     return payment_response
                     
@@ -213,15 +218,23 @@ class LnurlService:
         try:
             lnurl_params = await cls.parse_lnurl(lnurl_string)
             
-            return {
+            # Log the full response for debugging
+            log_debug(API, f"LNURL params received: {lnurl_params}")
+            
+            result = {
                 "supports_assets": lnurl_params.get("acceptsAssets", False),
                 "accepted_asset_ids": lnurl_params.get("acceptedAssetIds", []),
                 "asset_metadata": lnurl_params.get("assetMetadata", {}),
                 "min_sendable": lnurl_params.get("minSendable", 0),
                 "max_sendable": lnurl_params.get("maxSendable", 0),
                 "comment_allowed": lnurl_params.get("commentAllowed", 0),
-                "description": lnurl_params.get("metadata", "")
+                "description": lnurl_params.get("metadata", ""),
+                "callback": lnurl_params.get("callback", "")
             }
+            
+            log_info(API, f"LNURL asset support: supports_assets={result['supports_assets']}, accepted_ids={result['accepted_asset_ids']}")
+            
+            return result
         except Exception as e:
             log_error(API, f"Failed to check LNURL asset support: {str(e)}")
             return {

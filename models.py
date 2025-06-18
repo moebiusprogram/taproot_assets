@@ -181,7 +181,7 @@ class ParsedInvoice(BaseModel):
     """Model for parsed invoice data."""
     payment_hash: str
     amount: float
-    description: str
+    description: Optional[str] = ""
     expiry: int
     timestamp: int
     valid: bool

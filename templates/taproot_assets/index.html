@@ -375,8 +375,11 @@
       <div class="column content-center text-center q-mb-md">
         <h4 class="q-my-none text-bold">
           <span>{% raw %}{{ parseDialog.invoice.amount }}{% endraw %}</span>
-          <span class="text-subtitle1 q-ml-sm">{% raw %}{{ getAssetNameFromId(parseDialog.invoice.asset_id) || 'Unknown Asset' }}{% endraw %}</span>
+          <span class="text-subtitle1 q-ml-sm">{% raw %}{{ parseDialog.invoice.asset_info ? parseDialog.invoice.asset_info.asset_name : (getAssetNameFromId(parseDialog.invoice.asset_id) || 'Unknown Asset') }}{% endraw %}</span>
         </h4>
+        <div v-if="parseDialog.invoice.is_lnurl" class="text-caption text-grey-7 q-mt-sm">
+          LNURL Payment Request
+        </div>
       </div>
       <q-separator></q-separator>
       <h6 class="text-center">{% raw %}{{ parseDialog.invoice.description }}{% endraw %}</h6>
