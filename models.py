@@ -174,6 +174,7 @@ class PaymentResponse(BaseModel):
     internal_payment: Optional[bool] = False
     status: str = "success"  # Can be "success" or "failed"
     error: Optional[str] = None  # Error message if payment failed
+    lnurl_success_action: Optional[Dict[str, Any]] = None  # LNURL success action if present
 
 
 class ParsedInvoice(BaseModel):
@@ -185,3 +186,17 @@ class ParsedInvoice(BaseModel):
     timestamp: int
     valid: bool
     asset_id: Optional[str] = None
+
+
+class LnurlPayRequest(BaseModel):
+    """Request model for LNURL pay."""
+    lnurl: str
+    amount_msat: int
+    comment: Optional[str] = None
+    asset_id: Optional[str] = None
+    fee_limit_sats: Optional[int] = 100
+
+
+class LnurlInfoRequest(BaseModel):
+    """Request model for LNURL info/parsing."""
+    lnurl: str

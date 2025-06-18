@@ -8,12 +8,13 @@ from pydantic import BaseModel
 
 from .error_utils import raise_http_exception, handle_api_error
 from .logging_utils import log_debug, log_info, log_warning, log_error, API
-from .models import TaprootInvoiceRequest, TaprootPaymentRequest
+from .models import TaprootInvoiceRequest, TaprootPaymentRequest, LnurlPayRequest, LnurlInfoRequest
 
 # Import services
 from .services.asset_service import AssetService
 from .services.invoice_service import InvoiceService
 from .services.payment_service import PaymentService
+from .services.lnurl_service import LnurlService
 
 # The parent router in __init__.py already adds the "/taproot_assets" prefix
 # So we only need to add the API path here
@@ -141,3 +142,45 @@ async def api_get_asset_transactions(
     """Get asset transactions for the current wallet."""
     log_debug(API, f"Getting asset transactions for wallet {wallet.wallet.id}, asset_id={asset_id or 'all'}, limit={limit}")
     return await AssetService.get_asset_transactions(wallet, asset_id, limit)
+
+
+@taproot_assets_api_router.post("/lnurl/info", status_code=HTTPStatus.OK)
+@handle_api_error
+async def api_lnurl_info(
+    data: LnurlInfoRequest,
+    wallet: WalletTypeInfo = Depends(require_admin_key),
+):
+    """
+    Get information about an LNURL pay link, including asset support.
+    """
+    log_info(API, f"Getting LNURL info for wallet {wallet.wallet.id}")
+    return await LnurlService.check_lnurl_asset_support(data.lnurl)
+
+
+@taproot_assets_api_router.post("/lnurl/pay", status_code=HTTPStatus.OK)
+@handle_api_error
+async def api_lnurl_pay(
+    data: LnurlPayRequest,
+    wallet: WalletTypeInfo = Depends(require_admin_key),
+):
+    """
+    Pay an LNURL pay link using Taproot Assets.
+    
+    This endpoint:
+    1. Decodes the LNURL
+    2. Fetches payment parameters
+    3. Requests an invoice with the specified amount (and asset_id if supported)
+    4. Pays the invoice using the Taproot Assets payment service
+    """
+    log_info(API, f"Processing LNURL payment for wallet {wallet.wallet.id}, amount={data.amount_msat} msat")
+    
+    # Process the LNURL payment
+    payment_response = await LnurlService.pay_lnurl(
+        lnurl_string=data.lnurl,
+        amount_msat=data.amount_msat,
+        wallet_info=wallet,
+        comment=data.comment,
+        asset_id=data.asset_id
+    )
+    
+    return payment_response.dict()
