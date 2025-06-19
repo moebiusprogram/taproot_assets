@@ -926,6 +926,7 @@ class SettlementService:
             
             # Emit cross-extension event if invoice has extra metadata
             if invoice.extra:
+                log_info(TRANSFER, f"Emitting taproot payment event with extra data: {invoice.extra}")
                 from .cross_extension_service import CrossExtensionService
                 await CrossExtensionService.emit_taproot_payment_event(
                     payment_hash=invoice.payment_hash,
@@ -935,6 +936,8 @@ class SettlementService:
                     extra=invoice.extra,
                     wallet_id=invoice.wallet_id
                 )
+            else:
+                log_info(TRANSFER, f"Invoice has no extra metadata, skipping cross-extension event")
             
             # Get updated assets for notifications
             try:

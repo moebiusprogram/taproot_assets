@@ -1,5 +1,5 @@
 """Service for cross-extension communication."""
-import time
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from lnbits.core.models import Payment
 from lnbits.tasks import invoice_listeners
@@ -24,16 +24,17 @@ class CrossExtensionService:
         """
         # Create a Payment-like object for compatibility
         payment_event = Payment(
+            checking_id=payment_hash,  # Use payment_hash as checking_id for taproot payments
             payment_hash=payment_hash,
             bolt11="",  # Not used for taproot payments
             amount=satoshi_amount,  # Use satoshi amount for compatibility
             memo=extra.get("description", "") if extra else "",
-            time=int(time.time()),
+            time=datetime.now(timezone.utc),
             fee=0,
             preimage="",
-            pending=False,
+            status="success",  # Set status to success for completed payments
             extra=extra or {},
-            wallet_id=wallet_id,
+            wallet_id=wallet_id or "",
             webhook=None,
             webhook_status=None
         )

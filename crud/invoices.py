@@ -3,6 +3,7 @@ Invoice-related CRUD operations for Taproot Assets extension.
 """
 from typing import List, Optional, Tuple
 from datetime import datetime, timedelta
+import json
 
 from lnbits.helpers import urlsafe_short_hash
 
@@ -65,8 +66,22 @@ async def create_invoice(
         extra=extra
     )
     
-    # Insert using standardized method
-    await conn.insert(get_table_name("invoices"), invoice)
+    # Convert invoice to dict for insertion, handling the extra field
+    invoice_dict = invoice.dict()
+    if invoice_dict.get("extra") is not None:
+        invoice_dict["extra"] = json.dumps(invoice_dict["extra"])
+    
+    # Insert using raw SQL to handle the extra field properly
+    await conn.execute(
+        f"""
+        INSERT INTO {get_table_name("invoices")} 
+        (id, payment_hash, payment_request, asset_id, asset_amount, satoshi_amount, 
+         description, status, user_id, wallet_id, created_at, expires_at, paid_at, extra)
+        VALUES (:id, :payment_hash, :payment_request, :asset_id, :asset_amount, :satoshi_amount,
+                :description, :status, :user_id, :wallet_id, :created_at, :expires_at, :paid_at, :extra)
+        """,
+        invoice_dict
+    )
     
     return invoice
 
@@ -82,7 +97,19 @@ async def get_invoice(invoice_id: str, conn=None) -> Optional[TaprootInvoice]:
     Returns:
         Optional[TaprootInvoice]: The invoice if found, None otherwise
     """
-    return await get_record_by_id("invoices", invoice_id, TaprootInvoice, conn)
+    row = await (conn or db).fetchone(
+        f"SELECT * FROM {get_table_name('invoices')} WHERE id = :id",
+        {"id": invoice_id}
+    )
+    if row:
+        # Parse the extra field from JSON if it exists
+        if row.get("extra") and isinstance(row["extra"], str):
+            try:
+                row["extra"] = json.loads(row["extra"])
+            except json.JSONDecodeError:
+                row["extra"] = None
+        return TaprootInvoice(**row)
+    return None
 
 
 async def get_invoice_by_payment_hash(payment_hash: str, conn=None) -> Optional[TaprootInvoice]:
@@ -96,7 +123,19 @@ async def get_invoice_by_payment_hash(payment_hash: str, conn=None) -> Optional[
     Returns:
         Optional[TaprootInvoice]: The invoice if found, None otherwise
     """
-    return await get_record_by_field("invoices", "payment_hash", payment_hash, TaprootInvoice, conn=conn)
+    row = await (conn or db).fetchone(
+        f"SELECT * FROM {get_table_name('invoices')} WHERE payment_hash = :payment_hash",
+        {"payment_hash": payment_hash}
+    )
+    if row:
+        # Parse the extra field from JSON if it exists
+        if row.get("extra") and isinstance(row["extra"], str):
+            try:
+                row["extra"] = json.loads(row["extra"])
+            except json.JSONDecodeError:
+                row["extra"] = None
+        return TaprootInvoice(**row)
+    return None
 
 
 @with_transaction
@@ -144,7 +183,20 @@ async def get_user_invoices(user_id: str) -> List[TaprootInvoice]:
     Returns:
         List[TaprootInvoice]: List of invoices for the user
     """
-    return await get_records_by_field("invoices", "user_id", user_id, TaprootInvoice)
+    rows = await db.fetchall(
+        f"SELECT * FROM {get_table_name('invoices')} WHERE user_id = :user_id ORDER BY created_at DESC LIMIT 100",
+        {"user_id": user_id}
+    )
+    invoices = []
+    for row in rows:
+        # Parse the extra field from JSON if it exists
+        if row.get("extra") and isinstance(row["extra"], str):
+            try:
+                row["extra"] = json.loads(row["extra"])
+            except json.JSONDecodeError:
+                row["extra"] = None
+        invoices.append(TaprootInvoice(**row))
+    return invoices
 
 
 # Payment detection functions
