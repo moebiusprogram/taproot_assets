@@ -752,8 +752,6 @@ class SettlementService:
                 log_info(PAYMENT, f"Payment {payment_hash[:8]}... already processed, skipping record creation")
                 return True, None
                 
-            # Wait a short time to allow any in-progress settlements to complete
-            await asyncio.sleep(1.0)
             
             # Use transaction context manager with retry capability
             async with transaction(conn=conn, max_retries=5, retry_delay=0.2) as tx_conn:

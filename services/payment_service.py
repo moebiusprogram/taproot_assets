@@ -296,8 +296,6 @@ class PaymentService:
             description = parsed_invoice.description if parsed_invoice.description else None
             
             # Use the unified process_payment_settlement method
-            # Add a small delay to allow any pending transactions to complete
-            await asyncio.sleep(0.5)
             
             log_info(PAYMENT, f"Processing settlement: amount={parsed_invoice.amount}, asset_id={asset_id}")
             

@@ -46,7 +46,7 @@ class LnurlService:
                 
                 # Fetch the LNURL parameters
                 async with httpx.AsyncClient() as client:
-                    response = await client.get(url, timeout=40)
+                    response = await client.get(url, timeout=10)
                     response.raise_for_status()
                     
                     data = response.json()
@@ -133,7 +133,7 @@ class LnurlService:
                     response = await client.get(
                         callback_url,
                         params=callback_params,
-                        timeout=40
+                        timeout=10
                     )
                     response.raise_for_status()
                     

@@ -52,7 +52,7 @@ class TaprootInvoiceManager:
                 asset_specifier=rfq_pb2.AssetSpecifier(asset_id=asset_id_bytes),
                 asset_max_amt=asset_amount,
                 expiry=expiry_time,
-                timeout_seconds=30
+                timeout_seconds=5
             )
 
             # Add peer pubkey if provided
@@ -61,7 +61,7 @@ class TaprootInvoiceManager:
 
             try:
                 # Submit the buy order
-                buy_order_response = await rfq_stub.AddAssetBuyOrder(buy_order_request, timeout=30)
+                buy_order_response = await rfq_stub.AddAssetBuyOrder(buy_order_request, timeout=5)
             except grpc.aio.AioRpcError as e:
                 logger.error(f"gRPC error in AddAssetBuyOrder: {e.code()}: {e.details()}")
                 raise Exception(f"Failed to create buy order: {e.details()}")
@@ -122,7 +122,7 @@ class TaprootInvoiceManager:
 
             try:
                 # Send invoice request to daemon
-                response = await self.node.tapchannel_stub.AddInvoice(request, timeout=30)
+                response = await self.node.tapchannel_stub.AddInvoice(request, timeout=5)
             except grpc.aio.AioRpcError as e:
                 logger.error(f"gRPC error in AddInvoice: {e.code()}: {e.details()}")
                 raise Exception(f"Failed to add invoice: {e.details()}")

@@ -116,7 +116,7 @@ class TaprootPaymentManager:
                 router_payment_request = router_pb2.SendPaymentRequest(
                     payment_request=payment_request,
                     fee_limit_sat=fee_limit_sats,
-                    timeout_seconds=60,
+                    timeout_seconds=15,
                     no_inflight_updates=False
                 )
 
