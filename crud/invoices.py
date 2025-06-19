@@ -102,13 +102,15 @@ async def get_invoice(invoice_id: str, conn=None) -> Optional[TaprootInvoice]:
         {"id": invoice_id}
     )
     if row:
+        # Convert row to dict to make it mutable
+        row_dict = dict(row)
         # Parse the extra field from JSON if it exists
-        if row.get("extra") and isinstance(row["extra"], str):
+        if row_dict.get("extra") and isinstance(row_dict["extra"], str):
             try:
-                row["extra"] = json.loads(row["extra"])
+                row_dict["extra"] = json.loads(row_dict["extra"])
             except json.JSONDecodeError:
-                row["extra"] = None
-        return TaprootInvoice(**row)
+                row_dict["extra"] = None
+        return TaprootInvoice(**row_dict)
     return None
 
 
@@ -128,13 +130,15 @@ async def get_invoice_by_payment_hash(payment_hash: str, conn=None) -> Optional[
         {"payment_hash": payment_hash}
     )
     if row:
+        # Convert row to dict to make it mutable
+        row_dict = dict(row)
         # Parse the extra field from JSON if it exists
-        if row.get("extra") and isinstance(row["extra"], str):
+        if row_dict.get("extra") and isinstance(row_dict["extra"], str):
             try:
-                row["extra"] = json.loads(row["extra"])
+                row_dict["extra"] = json.loads(row_dict["extra"])
             except json.JSONDecodeError:
-                row["extra"] = None
-        return TaprootInvoice(**row)
+                row_dict["extra"] = None
+        return TaprootInvoice(**row_dict)
     return None
 
 
@@ -189,13 +193,15 @@ async def get_user_invoices(user_id: str) -> List[TaprootInvoice]:
     )
     invoices = []
     for row in rows:
+        # Convert row to dict to make it mutable
+        row_dict = dict(row)
         # Parse the extra field from JSON if it exists
-        if row.get("extra") and isinstance(row["extra"], str):
+        if row_dict.get("extra") and isinstance(row_dict["extra"], str):
             try:
-                row["extra"] = json.loads(row["extra"])
+                row_dict["extra"] = json.loads(row_dict["extra"])
             except json.JSONDecodeError:
-                row["extra"] = None
-        invoices.append(TaprootInvoice(**row))
+                row_dict["extra"] = None
+        invoices.append(TaprootInvoice(**row_dict))
     return invoices
 
 
