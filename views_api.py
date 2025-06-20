@@ -227,11 +227,23 @@ async def parse_invoice(
     Parse a payment request to extract invoice details.
     
     Args:
-        payment_request: The bolt11 payment request to parse
+        payment_request: The bolt11 payment request or LNURL to parse
     """
     try:
+        # Check if this is an LNURL
+        if payment_request.upper().startswith("LNURL"):
+            # For LNURL, return a special response
+            return {
+                "is_lnurl": True,
+                "payment_request": payment_request,
+                "description": "LNURL Pay Request",
+                "amount": 0,  # Amount will be determined by LNURL params
+            }
+        
+        # Otherwise parse as bolt11
         parsed = await PaymentService.parse_invoice(payment_request)
         return {
+            "is_lnurl": False,
             "payment_hash": parsed.payment_hash,
             "amount": parsed.amount,
             "asset_id": parsed.asset_id,
