@@ -20,7 +20,7 @@ const AssetService = {
       // Request assets from the API
       const response = await LNbits.api.request(
         'GET', 
-        '/taproot_assets/api/v1/taproot/listassets', 
+        '/taproot_assets/api/v1/taproot/assets', 
         wallet.adminkey
       );
       

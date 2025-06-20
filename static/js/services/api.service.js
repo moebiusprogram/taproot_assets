@@ -11,7 +11,7 @@ const ApiService = {
    */
   getAssets(adminkey) {
     return LNbits.api
-      .request('GET', '/taproot_assets/api/v1/taproot/listassets', adminkey)
+      .request('GET', '/taproot_assets/api/v1/taproot/assets', adminkey)
       .catch(error => {
         console.error('API Error getting assets:', error);
         throw error;
@@ -62,7 +62,7 @@ const ApiService = {
    */
   createInvoice(adminkey, payload) {
     return LNbits.api
-      .request('POST', '/taproot_assets/api/v1/taproot/invoice', adminkey, payload)
+      .request('POST', '/taproot_assets/api/v1/taproot/invoices', adminkey, payload)
       .catch(error => {
         console.error('API Error creating invoice:', error);
         throw error;
@@ -77,7 +77,7 @@ const ApiService = {
    */
   payInvoice(adminkey, payload) {
     return LNbits.api
-      .request('POST', '/taproot_assets/api/v1/taproot/pay', adminkey, payload)
+      .request('POST', '/taproot_assets/api/v1/taproot/payments', adminkey, payload)
       .catch(error => {
         console.error('API Error paying invoice:', error);
         throw error;
