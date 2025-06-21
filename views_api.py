@@ -1,5 +1,6 @@
 from http import HTTPStatus
 from typing import Optional
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from lnbits.core.models import User, WalletTypeInfo
@@ -284,6 +285,87 @@ async def api_lnurl_info(
     """
     log_info(API, f"Getting LNURL info for wallet {wallet.wallet.id}")
     return await LnurlService.check_lnurl_asset_support(data.lnurl)
+
+
+@taproot_assets_api_router.get("/rate/{asset_id}", status_code=HTTPStatus.OK)
+@handle_api_error
+async def api_get_asset_rate(
+    asset_id: str,
+    amount: int = Query(1, description="Amount to get rate for"),
+    wallet: WalletTypeInfo = Depends(require_admin_key),
+):
+    """
+    Get current RFQ rate for an asset.
+    Returns the rate in sats per asset unit.
+    """
+    log_info(API, f"Getting rate for asset {asset_id}, amount={amount}")
+    
+    try:
+        # Import required modules
+        from .tapd.taproot_factory import TaprootAssetsFactory
+        from ...wallets.tapd_grpc_files.rfqrpc import rfq_pb2, rfq_pb2_grpc
+        
+        # Create wallet instance
+        taproot_wallet = await TaprootAssetsFactory.create_wallet(
+            user_id=wallet.wallet.user,
+            wallet_id=wallet.wallet.id
+        )
+        
+        # Get RFQ stub
+        rfq_stub = rfq_pb2_grpc.RfqStub(taproot_wallet.node.channel)
+        
+        # Find peer with asset channel
+        assets = await AssetService.list_assets(wallet)
+        peer_pubkey = None
+        
+        for asset in assets:
+            if asset.get("asset_id") == asset_id and asset.get("channel_info") and asset["channel_info"].get("peer_pubkey"):
+                peer_pubkey = asset["channel_info"]["peer_pubkey"]
+                break
+        
+        if not peer_pubkey:
+            return {
+                "error": "No peer found with channel for this asset",
+                "rate_per_unit": None
+            }
+        
+        # Create buy order request
+        buy_order_request = rfq_pb2.AddAssetBuyOrderRequest(
+            asset_specifier=rfq_pb2.AssetSpecifier(asset_id=bytes.fromhex(asset_id)),
+            asset_max_amt=amount,
+            expiry=int((datetime.now(timezone.utc) + timedelta(minutes=1)).timestamp()),
+            timeout_seconds=5,
+            peer_pub_key=bytes.fromhex(peer_pubkey)
+        )
+        
+        # Get quote
+        buy_order_response = await rfq_stub.AddAssetBuyOrder(buy_order_request, timeout=5)
+        
+        if buy_order_response.accepted_quote:
+            # Extract rate
+            rate_info = buy_order_response.accepted_quote.ask_asset_rate
+            total_millisats = float(rate_info.coefficient) / (10 ** rate_info.scale)
+            rate_per_unit = (total_millisats / amount) / 1000
+            
+            return {
+                "asset_id": asset_id,
+                "amount": amount,
+                "rate_per_unit": rate_per_unit,
+                "total_sats": int(amount * rate_per_unit),
+                "quote_id": buy_order_response.accepted_quote.id.hex()
+            }
+        else:
+            return {
+                "error": "No RFQ quote received",
+                "rate_per_unit": None
+            }
+            
+    except Exception as e:
+        log_error(API, f"Failed to get rate: {str(e)}")
+        return {
+            "error": str(e),
+            "rate_per_unit": None
+        }
 
 
 @taproot_assets_api_router.post("/lnurl/pay", status_code=HTTPStatus.OK)
