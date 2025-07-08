@@ -183,8 +183,13 @@ class TaprootAssetsNodeExtension(Node):
 
         log_debug(NODE, f"Creating gRPC channels to {self.host}")
         # Create gRPC channels
+        log_info(NODE, f"Creating secure channel to {self.host} with tapd credentials")
         self.channel = grpc.aio.secure_channel(self.host, self.combined_creds)
+        log_info(NODE, f"Channel created: {self.channel}")
+        
+        log_info(NODE, "Creating TaprootAssets stub")
         self.stub = create_taprootassets_client(self.channel)
+        log_info(NODE, f"TaprootAssets stub created: {self.stub}")
 
         # Create Lightning gRPC channel
         self.ln_channel = grpc.aio.secure_channel(self.host, self.ln_combined_creds)

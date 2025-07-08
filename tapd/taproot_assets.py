@@ -40,20 +40,28 @@ class TaprootAssetManager:
         Returns:
             List[Dict[str, Any]]: List of assets
         """
+        logger.info(f"list_assets called with force_refresh={force_refresh}")
+        
         # Check cache first if not forcing refresh
         if not force_refresh:
             cached_assets = cache.get(self.ASSET_CACHE_KEY)
             if cached_assets:
+                logger.info(f"Returning {len(cached_assets)} cached assets")
                 return cached_assets
+        
+        logger.info("No cache hit, fetching from tapd")
         try:
             # Get all assets from tapd
-            request = taprootassets_pb2.ListAssetRequest(
-                with_witness=False,
-                include_spent=False,
-                include_leased=True,
-                include_unconfirmed_mints=True
-            )
+            logger.info("Creating ListAssetRequest")
+            # Use empty request - the parameters were causing issues with v0.15.0
+            request = taprootassets_pb2.ListAssetRequest()
+            
+            logger.info(f"Making RPC call to ListAssets on stub: {self.node.stub}")
+            logger.info(f"Node host: {self.node.host}")
+            logger.info(f"Request params: with_witness={request.with_witness}, include_spent={request.include_spent}, include_leased={request.include_leased}, include_unconfirmed_mints={request.include_unconfirmed_mints}")
+            
             response = await self.node.stub.ListAssets(request, timeout=10)
+            logger.info(f"ListAssets RPC completed successfully, got {len(response.assets)} assets")
 
             # Convert response assets to dictionary format
             assets = []
@@ -125,6 +133,10 @@ class TaprootAssetManager:
             return result_assets
         except Exception as e:
             logger.error(f"Failed to list assets: {str(e)}")
+            logger.error(f"Exception type: {type(e)}")
+            logger.error(f"Exception details: {repr(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return []  # Return empty list on error
 
     async def list_channel_assets(self, force_refresh=False) -> List[Dict[str, Any]]:
@@ -159,43 +171,83 @@ class TaprootAssetManager:
                     # Parse JSON data
                     asset_data = json.loads(channel.custom_channel_data.decode('utf-8'))
                     
-                    # Process each asset in the channel
-                    for asset in asset_data.get("assets", []):
-                        asset_utxo = asset.get("asset_utxo", {})
-                        
-                        # Extract asset ID
-                        asset_id = ""
-                        if "asset_id" in asset_utxo:
-                            asset_id = asset_utxo["asset_id"]
-                        elif "asset_genesis" in asset_utxo and "asset_id" in asset_utxo["asset_genesis"]:
-                            asset_id = asset_utxo["asset_genesis"]["asset_id"]
-                        
-                        # Skip entries without asset ID
-                        if not asset_id:
-                            continue
+                    # Handle new v0.15.0 format with funding_assets
+                    if "funding_assets" in asset_data:
+                        # Process funding assets (contains full asset details)
+                        for asset in asset_data.get("funding_assets", []):
+                            asset_genesis = asset.get("asset_genesis", {})
+                            asset_id = asset_genesis.get("asset_id", "")
+                            name = asset_genesis.get("name", "")
                             
-                        # Extract name
-                        name = ""
-                        if "name" in asset_utxo:
-                            name = asset_utxo["name"]
-                        elif "asset_genesis" in asset_utxo and "name" in asset_utxo["asset_genesis"]:
-                            name = asset_utxo["asset_genesis"]["name"]
-                        
-                        # Create asset info dictionary
-                        asset_info = {
-                            "asset_id": asset_id,
-                            "name": name,
-                            "channel_id": str(channel.chan_id),
-                            "channel_point": channel.channel_point,
-                            "remote_pubkey": channel.remote_pubkey,
-                            "capacity": asset.get("capacity", 0),
-                            "local_balance": asset.get("local_balance", 0),
-                            "remote_balance": asset.get("remote_balance", 0),
-                            "commitment_type": str(channel.commitment_type),
-                            "active": channel.active  # Include active status from channel
-                        }
-                        
-                        channel_assets.append(asset_info)
+                            if not asset_id:
+                                continue
+                            
+                            # Get balance info from local_assets
+                            local_balance = 0
+                            for local_asset in asset_data.get("local_assets", []):
+                                if local_asset.get("asset_id") == asset_id:
+                                    local_balance = local_asset.get("amount", 0)
+                                    break
+                            
+                            # Get remote balance
+                            remote_balance = 0
+                            for remote_asset in asset_data.get("remote_assets", []):
+                                if remote_asset.get("asset_id") == asset_id:
+                                    remote_balance = remote_asset.get("amount", 0)
+                                    break
+                            
+                            asset_info = {
+                                "asset_id": asset_id,
+                                "name": name,
+                                "channel_id": str(channel.chan_id),
+                                "channel_point": channel.channel_point,
+                                "remote_pubkey": channel.remote_pubkey,
+                                "capacity": asset_data.get("capacity", 0),
+                                "local_balance": local_balance,
+                                "remote_balance": remote_balance,
+                                "commitment_type": str(channel.commitment_type),
+                                "active": channel.active
+                            }
+                            channel_assets.append(asset_info)
+                    
+                    # Also handle old format for backwards compatibility
+                    elif "assets" in asset_data:
+                        for asset in asset_data.get("assets", []):
+                            asset_utxo = asset.get("asset_utxo", {})
+                            
+                            # Extract asset ID
+                            asset_id = ""
+                            if "asset_id" in asset_utxo:
+                                asset_id = asset_utxo["asset_id"]
+                            elif "asset_genesis" in asset_utxo and "asset_id" in asset_utxo["asset_genesis"]:
+                                asset_id = asset_utxo["asset_genesis"]["asset_id"]
+                            
+                            # Skip entries without asset ID
+                            if not asset_id:
+                                continue
+                                
+                            # Extract name
+                            name = ""
+                            if "name" in asset_utxo:
+                                name = asset_utxo["name"]
+                            elif "asset_genesis" in asset_utxo and "name" in asset_utxo["asset_genesis"]:
+                                name = asset_utxo["asset_genesis"]["name"]
+                            
+                            # Create asset info dictionary
+                            asset_info = {
+                                "asset_id": asset_id,
+                                "name": name,
+                                "channel_id": str(channel.chan_id),
+                                "channel_point": channel.channel_point,
+                                "remote_pubkey": channel.remote_pubkey,
+                                "capacity": asset.get("capacity", 0),
+                                "local_balance": asset.get("local_balance", 0),
+                                "remote_balance": asset.get("remote_balance", 0),
+                                "commitment_type": str(channel.commitment_type),
+                                "active": channel.active  # Include active status from channel
+                            }
+                            
+                            channel_assets.append(asset_info)
                 except Exception as e:
                     logger.debug(f"Failed to process channel {channel.channel_point}: {e}")
                     continue
