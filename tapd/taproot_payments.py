@@ -67,6 +67,12 @@ class TaprootPaymentManager:
         with LogContext(PAYMENT, f"paying asset invoice", log_level="info"):
             try:
                 log_debug(PAYMENT, f"Paying asset invoice: {payment_request[:30]}...")
+                
+                # RFQ Debug: Log payment initiation
+                log_info(PAYMENT, f"RFQ_DEBUG: Starting RFQ payment process")
+                log_info(PAYMENT, f"RFQ_DEBUG: Invoice: {payment_request[:50]}...")
+                log_info(PAYMENT, f"RFQ_DEBUG: Asset ID provided: {asset_id}")
+                log_info(PAYMENT, f"RFQ_DEBUG: Peer pubkey: {peer_pubkey}")
 
                 # Set default fee limit with minimum for routing
                 fee_limit_sats = max(fee_limit_sats or 10, 1)
@@ -134,11 +140,15 @@ class TaprootPaymentManager:
 
                 # Send payment and process stream responses
                 log_info(PAYMENT, f"Sending payment for asset_id={asset_id}")
+                log_info(PAYMENT, f"RFQ_DEBUG: Initiating SendPayment gRPC call")
+                log_info(PAYMENT, f"RFQ_DEBUG: Payment hash: {payment_hash}")
+                log_info(PAYMENT, f"RFQ_DEBUG: Asset ID bytes: {asset_id_bytes.hex()}")
                 
                 try:
                     response_stream = self.node.tapchannel_stub.SendPayment(request)
                 except grpc.aio.AioRpcError as e:
                     log_error(PAYMENT, f"gRPC error starting payment: {e.code()}: {e.details()}")
+                    log_error(PAYMENT, f"RFQ_DEBUG: gRPC error details: {e}")
                     raise Exception(f"Failed to start payment: {e.details()}")
                 
                 # Process the stream responses
@@ -152,6 +162,12 @@ class TaprootPaymentManager:
                         # Handle accepted sell order
                         if hasattr(response, 'accepted_sell_order') and response.HasField('accepted_sell_order'):
                             log_info(PAYMENT, "Received accepted sell order response")
+                            order = response.accepted_sell_order
+                            log_info(PAYMENT, f"RFQ_DEBUG: Accepted sell order received")
+                            log_info(PAYMENT, f"RFQ_DEBUG: Order ID: {order.id.hex() if hasattr(order, 'id') else 'unknown'}")
+                            log_info(PAYMENT, f"RFQ_DEBUG: Asset amount: {order.asset_amount if hasattr(order, 'asset_amount') else 'unknown'}")
+                            log_info(PAYMENT, f"RFQ_DEBUG: Bid price: {order.bid_price if hasattr(order, 'bid_price') else 'unknown'}")
+                            log_info(PAYMENT, f"RFQ_DEBUG: Ask price: {order.ask_price if hasattr(order, 'ask_price') else 'unknown'}")
                             accepted_sell_order_seen = True
                             continue
                             
@@ -178,11 +194,13 @@ class TaprootPaymentManager:
                     
                     # Stream completed without explicit error
                     log_info(PAYMENT, "Payment stream completed")
+                    log_info(PAYMENT, f"RFQ_DEBUG: Stream completed - Status: {status}, Preimage: {'yes' if preimage else 'no'}, Accepted order: {accepted_sell_order_seen}")
                     
                     # If we've seen an accepted_sell_order but no final status,
                     # consider it potentially successful
                     if accepted_sell_order_seen and status != "failed":
                         log_info(PAYMENT, "Payment appears to be in progress (saw accepted sell order)")
+                        log_warning(PAYMENT, "RFQ_DEBUG: WARNING - RFQ order accepted but no final payment status received!")
                         status = "success"
                     
                 except grpc.aio.AioRpcError as e:
@@ -233,6 +251,11 @@ class TaprootPaymentManager:
                 
                 # We're NOT recording the payment here anymore - this will be handled by the PaymentService
                 # This fixes the issue with the duplicate payment records
+                
+                # RFQ Debug: Final summary
+                log_info(PAYMENT, f"RFQ_DEBUG: Payment completed - Hash: {payment_hash}, Status: {status}")
+                log_info(PAYMENT, f"RFQ_DEBUG: Asset: {asset_id}, Amount: {asset_amount}, Fee: {fee_msat // 1000} sats")
+                log_info(PAYMENT, f"RFQ_DEBUG: Preimage present: {'yes' if preimage else 'no'}")
                 
                 # Return response with all available information
                 return {

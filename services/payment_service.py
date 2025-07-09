@@ -17,6 +17,7 @@ from ..models import TaprootPaymentRequest, PaymentResponse, ParsedInvoice, Tapr
 from ..logging_utils import log_debug, log_info, log_warning, log_error, PAYMENT, API
 from ..tapd.taproot_factory import TaprootAssetsFactory
 from ..error_utils import raise_http_exception, ErrorContext, handle_error
+from ..tapd.taproot_adapter import lightning_pb2
 # Import from crud re-exports
 from ..crud import (
     get_invoice_by_payment_hash,
@@ -55,8 +56,18 @@ class PaymentService:
         """
         try:
             with ErrorContext("process_payment", PAYMENT):
+                # RFQ Debug: Generate session ID for tracking
+                import hashlib
+                import time
+                rfq_session_id = hashlib.sha256(f"{data.payment_request}{time.time()}".encode()).hexdigest()[:16]
+                log_info(PAYMENT, f"RFQ_DEBUG: Session {rfq_session_id} - Starting payment process")
+                log_info(PAYMENT, f"RFQ_DEBUG: Session {rfq_session_id} - Asset ID: {data.asset_id}")
+                log_info(PAYMENT, f"RFQ_DEBUG: Session {rfq_session_id} - Fee limit: {data.fee_limit_sats}")
+                
                 # Parse the invoice to get payment details
                 parsed_invoice = await cls.parse_invoice(data.payment_request)
+                log_info(PAYMENT, f"RFQ_DEBUG: Session {rfq_session_id} - Invoice amount: {parsed_invoice.amount}")
+                log_info(PAYMENT, f"RFQ_DEBUG: Session {rfq_session_id} - Payment hash: {parsed_invoice.payment_hash}")
                 
                 # Determine the payment type if not forced
                 if force_payment_type:
@@ -67,6 +78,8 @@ class PaymentService:
                         parsed_invoice.payment_hash, wallet.wallet.user
                     )
                     log_info(PAYMENT, f"Payment type determined: {payment_type}")
+                
+                log_info(PAYMENT, f"RFQ_DEBUG: Session {rfq_session_id} - Payment type: {payment_type}")
                 
                 # Reject self-payments
                 if payment_type == "self":
@@ -256,6 +269,19 @@ class PaymentService:
                 log_debug(PAYMENT, "No asset ID available from client or invoice")
                 asset_id_to_use = None
                 
+            # RFQ Debug: Get channel state before payment
+            try:
+                # Get channel balances before payment
+                from ..tapd.taproot_adapter import lightning_pb2_grpc
+                ln_stub = lightning_pb2_grpc.LightningStub(taproot_wallet.node.channel)
+                channels_before = await ln_stub.ListChannels(lightning_pb2.ListChannelsRequest())
+                log_info(PAYMENT, f"RFQ_DEBUG: Channels before payment: {len(channels_before.channels)} channels")
+                for ch in channels_before.channels:
+                    if ch.active:
+                        log_info(PAYMENT, f"RFQ_DEBUG: Channel {ch.channel_point[:30]}... - Local: {ch.local_balance}, Remote: {ch.remote_balance}")
+            except Exception as e:
+                log_warning(PAYMENT, f"RFQ_DEBUG: Could not get channel state before: {e}")
+            
             # Make the payment using the low-level wallet method
             # This only handles the direct node communication
             log_info(PAYMENT, f"Making external payment, fee_limit_sats={fee_limit_sats}, invoice_amount={parsed_invoice.amount}")
@@ -267,6 +293,16 @@ class PaymentService:
             )
             
             log_info(PAYMENT, f"Raw payment result: {payment_result}")
+            
+            # RFQ Debug: Get channel state after payment
+            try:
+                channels_after = await ln_stub.ListChannels(lightning_pb2.ListChannelsRequest())
+                log_info(PAYMENT, f"RFQ_DEBUG: Channels after payment: {len(channels_after.channels)} channels")
+                for ch in channels_after.channels:
+                    if ch.active:
+                        log_info(PAYMENT, f"RFQ_DEBUG: Channel {ch.channel_point[:30]}... - Local: {ch.local_balance}, Remote: {ch.remote_balance}")
+            except Exception as e:
+                log_warning(PAYMENT, f"RFQ_DEBUG: Could not get channel state after: {e}")
 
             # Verify payment success
             if "status" in payment_result and payment_result["status"] != "success":
