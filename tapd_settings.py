@@ -1,31 +1,70 @@
 import os
 from typing import Dict, Any
 from loguru import logger
+from pathlib import Path
 
 # Default cache expiry times
 ASSET_CACHE_EXPIRY_SECONDS = 300  # 5 minutes
 
 class TaprootSettings:
     """
-    Load Taproot Assets settings from environment variables.
+    Load Taproot Assets settings from config file or environment variables.
     """
     
     def __init__(self):
+        # Load settings from config file
+        config_values = self._load_config_file()
+        
         # TAPD connection settings
-        self.tapd_host = os.environ.get("TAPD_HOST", None)
-        self.tapd_network = os.environ.get("TAPD_NETWORK", "mainnet")  # Keeping default for network
-        self.tapd_tls_cert_path = os.environ.get("TAPD_TLS_CERT_PATH", None)
-        self.tapd_macaroon_path = os.environ.get("TAPD_MACAROON_PATH", None)
-        self.tapd_macaroon_hex = os.environ.get("TAPD_MACAROON_HEX", None)
+        # First try config file, then environment variables
+        self.tapd_host = config_values.get("TAPD_HOST") or os.environ.get("TAPD_HOST", None)
+        self.tapd_network = config_values.get("TAPD_NETWORK") or os.environ.get("TAPD_NETWORK", "mainnet")
+        self.tapd_tls_cert_path = config_values.get("TAPD_TLS_CERT_PATH") or os.environ.get("TAPD_TLS_CERT_PATH", None)
+        self.tapd_macaroon_path = config_values.get("TAPD_MACAROON_PATH") or os.environ.get("TAPD_MACAROON_PATH", None)
+        self.tapd_macaroon_hex = config_values.get("TAPD_MACAROON_HEX") or os.environ.get("TAPD_MACAROON_HEX", None)
         
         # LND connection settings
-        self.lnd_macaroon_path = os.environ.get("LND_REST_MACAROON", None)
-        self.lnd_macaroon_hex = os.environ.get("LND_MACAROON_HEX", None)
+        self.lnd_macaroon_path = config_values.get("LND_REST_MACAROON") or os.environ.get("LND_REST_MACAROON", None)
+        self.lnd_macaroon_hex = config_values.get("LND_MACAROON_HEX") or os.environ.get("LND_MACAROON_HEX", None)
         
         # Fee settings
-        self.default_sat_fee = int(os.environ.get("TAPD_DEFAULT_SAT_FEE", "1"))  # Keeping default for fee
+        default_fee = config_values.get("TAPD_DEFAULT_SAT_FEE") or os.environ.get("TAPD_DEFAULT_SAT_FEE", "1")
+        self.default_sat_fee = int(default_fee)
         
-        logger.info("Taproot Assets settings loaded from environment variables")
+        logger.info("Taproot Assets settings loaded from config file or environment variables")
+        logger.info(f"TAPD_HOST: {self.tapd_host}")
+        logger.info(f"TAPD_TLS_CERT_PATH: {self.tapd_tls_cert_path}")
+        logger.info(f"TAPD_MACAROON_PATH: {self.tapd_macaroon_path}")
+    
+    def _load_config_file(self) -> Dict[str, str]:
+        """Load settings from taproot_assets.conf file."""
+        config_values = {}
+        config_path = Path(__file__).parent / "taproot_assets.conf"
+        
+        if config_path.exists():
+            try:
+                with open(config_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        # Skip comments and empty lines
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            key = key.strip()
+                            value = value.strip()
+                            # Remove quotes if present
+                            if value.startswith('"') and value.endswith('"'):
+                                value = value[1:-1]
+                            elif value.startswith("'") and value.endswith("'"):
+                                value = value[1:-1]
+                            config_values[key] = value
+                logger.info(f"Loaded config from {config_path}")
+            except Exception as e:
+                logger.error(f"Error loading config file: {e}")
+        else:
+            logger.warning(f"Config file not found at {config_path}")
+            logger.info("Create taproot_assets.conf from taproot_assets.conf.example")
+        
+        return config_values
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert settings to a dictionary for API responses."""

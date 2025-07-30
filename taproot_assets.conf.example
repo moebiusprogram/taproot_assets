@@ -1,0 +1,20 @@
+# Taproot Assets Extension Configuration
+# Copy this file to taproot_assets.conf and fill in your settings
+
+# TAPD connection settings
+TAPD_HOST=127.0.0.1:10009
+TAPD_NETWORK=mainnet
+TAPD_TLS_CERT_PATH=/home/ubuntu/.lnd/tls.cert
+TAPD_MACAROON_PATH=/home/ubuntu/.tapd/data/mainnet/admin.macaroon
+
+# Optional: Use hex-encoded macaroon instead of file path
+# TAPD_MACAROON_HEX=
+
+# LND connection settings (for tapd operations that require LND)
+LND_REST_MACAROON=/home/ubuntu/.lnd/data/chain/bitcoin/mainnet/admin.macaroon
+
+# Optional: Use hex-encoded LND macaroon instead of file path
+# LND_MACAROON_HEX=
+
+# Fee settings
+TAPD_DEFAULT_SAT_FEE=1
