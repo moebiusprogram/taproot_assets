@@ -109,59 +109,38 @@ class TaprootAssetsNodeExtension(Node):
         tapd_macaroon_hex: str = None,
     ):
         from ..tapd_settings import taproot_settings
+        from lnbits.settings import settings as lnbits_settings
 
         # Initialize the base Node class
         super().__init__(wallet)
         
         log_debug(NODE, "Initializing TaprootAssetsNodeExtension")
         
-        self.host = host or taproot_settings.tapd_host
-        self.network = network or taproot_settings.tapd_network
+        # Determine if we should try litd integrated mode
+        self.use_litd_integrated = False
+        self.is_standalone_tapd = taproot_settings.has_standalone_config
+        
+        if not self.is_standalone_tapd:
+            # Try to use LND settings for litd integrated mode
+            self._try_litd_integrated_mode(lnbits_settings)
+        
+        if not self.use_litd_integrated:
+            # Use standalone tapd configuration
+            self.host = host or taproot_settings.tapd_host
+            self.network = network or taproot_settings.tapd_network
 
-        # Get paths from settings if not provided
-        tls_cert_path = tls_cert_path or taproot_settings.tapd_tls_cert_path
-        macaroon_path = macaroon_path or taproot_settings.tapd_macaroon_path
-        ln_macaroon_path = ln_macaroon_path or taproot_settings.lnd_macaroon_path
-        tapd_macaroon_hex = tapd_macaroon_hex or taproot_settings.tapd_macaroon_hex
-        ln_macaroon_hex = ln_macaroon_hex or taproot_settings.lnd_macaroon_hex
-
-        # Read TLS certificate
-        try:
-            log_debug(NODE, f"Reading TLS cert from {tls_cert_path}")
-            with open(tls_cert_path, 'rb') as f:
-                self.cert = f.read()
-            log_debug(NODE, "Successfully read TLS certificate")
-        except Exception as e:
-            log_error(NODE, f"Failed to read TLS cert from {tls_cert_path}: {str(e)}")
-            raise TaprootAssetError(f"Failed to read TLS cert from {tls_cert_path}: {str(e)}")
-
-        # Read Taproot macaroon
-        if tapd_macaroon_hex:
-            log_debug(NODE, "Using provided tapd_macaroon_hex")
-            self.macaroon = tapd_macaroon_hex
-        else:
-            try:
-                log_debug(NODE, f"Reading Taproot macaroon from {macaroon_path}")
-                with open(macaroon_path, 'rb') as f:
-                    self.macaroon = f.read().hex()
-                log_debug(NODE, "Successfully read Taproot macaroon")
-            except Exception as e:
-                log_error(NODE, f"Failed to read Taproot macaroon from {macaroon_path}: {str(e)}")
-                raise TaprootAssetError(f"Failed to read Taproot macaroon from {macaroon_path}: {str(e)}")
-
-        # Read Lightning macaroon
-        if ln_macaroon_hex:
-            log_debug(NODE, "Using provided ln_macaroon_hex")
-            self.ln_macaroon = ln_macaroon_hex
-        else:
-            try:
-                log_debug(NODE, f"Reading Lightning macaroon from {ln_macaroon_path}")
-                with open(ln_macaroon_path, 'rb') as f:
-                    self.ln_macaroon = f.read().hex()
-                log_debug(NODE, "Successfully read Lightning macaroon")
-            except Exception as e:
-                log_error(NODE, f"Failed to read Lightning macaroon from {ln_macaroon_path}: {str(e)}")
-                raise TaprootAssetError(f"Failed to read Lightning macaroon from {ln_macaroon_path}: {str(e)}")
+            # Get paths from settings if not provided
+            tls_cert_path = tls_cert_path or taproot_settings.tapd_tls_cert_path
+            macaroon_path = macaroon_path or taproot_settings.tapd_macaroon_path
+            ln_macaroon_path = ln_macaroon_path or taproot_settings.lnd_macaroon_path
+            tapd_macaroon_hex = tapd_macaroon_hex or taproot_settings.tapd_macaroon_hex
+            ln_macaroon_hex = ln_macaroon_hex or taproot_settings.lnd_macaroon_hex
+            
+            # Read credentials for standalone mode
+            self._read_standalone_credentials(
+                tls_cert_path, macaroon_path, ln_macaroon_path,
+                tapd_macaroon_hex, ln_macaroon_hex
+            )
 
         log_debug(NODE, "Setting up gRPC credentials")
         # Setup gRPC credentials for Taproot
