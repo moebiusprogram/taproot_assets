@@ -209,6 +209,116 @@ class TaprootAssetsNodeExtension(Node):
         self.transfer_manager = TaprootTransferManager.get_instance(self)
         
         # Note: Asset transfer monitoring has been removed as it was not fully implemented
+        log_debug(NODE, "All connections initialized successfully")
+    
+    def _try_litd_integrated_mode(self, lnbits_settings):
+        """Try to configure for litd integrated mode using LNbits LND settings."""
+        try:
+            # Check if we have LND gRPC settings configured
+            if hasattr(lnbits_settings, 'lnd_grpc_endpoint') and lnbits_settings.lnd_grpc_endpoint:
+                log_info(NODE, "Attempting to use litd integrated mode via LND settings")
+                
+                # Use LND settings for litd connection
+                self.host = f"{lnbits_settings.lnd_grpc_endpoint}:{lnbits_settings.lnd_grpc_port}"
+                self.network = "mainnet"  # Will be determined from node info
+                
+                # Try to use LND certificate and macaroon
+                cert_path = lnbits_settings.lnd_grpc_cert or lnbits_settings.lnd_cert
+                if cert_path and os.path.exists(cert_path):
+                    with open(cert_path, 'rb') as f:
+                        self.cert = f.read()
+                    
+                    # Load LND macaroon
+                    from lnbits.wallets.macaroon import load_macaroon
+                    macaroon = (
+                        lnbits_settings.lnd_grpc_macaroon
+                        or lnbits_settings.lnd_grpc_admin_macaroon
+                        or lnbits_settings.lnd_admin_macaroon
+                    )
+                    encrypted_macaroon = getattr(lnbits_settings, 'lnd_grpc_macaroon_encrypted', None)
+                    
+                    if macaroon:
+                        macaroon_bytes = load_macaroon(macaroon, encrypted_macaroon)
+                        self.macaroon = macaroon_bytes.hex()
+                        self.ln_macaroon = self.macaroon  # Use same macaroon for both
+                        self.use_litd_integrated = True
+                        log_info(NODE, f"Configured for litd integrated mode at {self.host}")
+                        return
+        except Exception as e:
+            log_warning(NODE, f"Could not configure litd integrated mode: {e}")
+        
+        # If we get here, litd integrated mode failed
+        self.use_litd_integrated = False
+    
+    def _read_standalone_credentials(self, tls_cert_path, macaroon_path, 
+                                   ln_macaroon_path, tapd_macaroon_hex, ln_macaroon_hex):
+        """Read credentials for standalone tapd mode."""
+        if not tls_cert_path or not (macaroon_path or tapd_macaroon_hex):
+            raise TaprootAssetError(
+                "Failed to connect to Taproot Assets daemon\n\n"
+                "The extension tried to connect via litd integrated mode but the connection failed.\n\n"
+                "If you're running tapd separately, create a configuration file:\n"
+                "- Copy taproot_assets.conf.example to taproot_assets.conf\n"
+                "- Update TAPD_HOST, TAPD_TLS_CERT_PATH, and TAPD_MACAROON_PATH\n\n"
+                "See documentation for setup instructions."
+            )
+        
+        # Read TLS certificate
+        try:
+            log_debug(NODE, f"Reading TLS cert from {tls_cert_path}")
+            with open(tls_cert_path, 'rb') as f:
+                self.cert = f.read()
+            log_debug(NODE, "Successfully read TLS certificate")
+        except Exception as e:
+            log_error(NODE, f"Failed to read TLS cert from {tls_cert_path}: {str(e)}")
+            raise TaprootAssetError(
+                f"Failed to read TLS certificate from {tls_cert_path}\n\n"
+                f"Error: {str(e)}\n\n"
+                "Please check your taproot_assets.conf file and ensure:\n"
+                "- TAPD_TLS_CERT_PATH points to a valid TLS certificate\n"
+                "- You have read permissions for the certificate file\n"
+                "- tapd is running and accessible at the configured host"
+            )
+
+        # Read Taproot macaroon
+        if tapd_macaroon_hex:
+            log_debug(NODE, "Using provided tapd_macaroon_hex")
+            self.macaroon = tapd_macaroon_hex
+        else:
+            try:
+                log_debug(NODE, f"Reading Taproot macaroon from {macaroon_path}")
+                with open(macaroon_path, 'rb') as f:
+                    self.macaroon = f.read().hex()
+                log_debug(NODE, "Successfully read Taproot macaroon")
+            except Exception as e:
+                log_error(NODE, f"Failed to read Taproot macaroon from {macaroon_path}: {str(e)}")
+                raise TaprootAssetError(
+                    f"Failed to read Taproot macaroon from {macaroon_path}\n\n"
+                    f"Error: {str(e)}\n\n"
+                    "Please check your taproot_assets.conf file and ensure:\n"
+                    "- TAPD_MACAROON_PATH points to a valid macaroon file\n"
+                    "- You have read permissions for the macaroon file"
+                )
+
+        # Read Lightning macaroon
+        if ln_macaroon_hex:
+            log_debug(NODE, "Using provided ln_macaroon_hex")
+            self.ln_macaroon = ln_macaroon_hex
+        else:
+            try:
+                log_debug(NODE, f"Reading Lightning macaroon from {ln_macaroon_path}")
+                with open(ln_macaroon_path, 'rb') as f:
+                    self.ln_macaroon = f.read().hex()
+                log_debug(NODE, "Successfully read Lightning macaroon")
+            except Exception as e:
+                log_error(NODE, f"Failed to read Lightning macaroon from {ln_macaroon_path}: {str(e)}")
+                raise TaprootAssetError(
+                    f"Failed to read Lightning macaroon from {ln_macaroon_path}\n\n"
+                    f"Error: {str(e)}\n\n"
+                    "Please check your taproot_assets.conf file and ensure:\n"
+                    "- LND_REST_MACAROON points to a valid macaroon file\n"
+                    "- You have read permissions for the macaroon file"
+                )
 
     def _protobuf_to_dict(self, pb_obj):
         """Convert a protobuf object to a JSON-serializable dict."""

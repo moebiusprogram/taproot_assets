@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from loguru import logger
 from pathlib import Path
 
@@ -9,11 +9,20 @@ ASSET_CACHE_EXPIRY_SECONDS = 300  # 5 minutes
 class TaprootSettings:
     """
     Load Taproot Assets settings from config file or environment variables.
+    Supports both litd integrated mode (no config needed) and standalone tapd mode.
     """
     
     def __init__(self):
         # Load settings from config file
         config_values = self._load_config_file()
+        
+        # Check if we have any tapd-specific configuration
+        self.has_standalone_config = bool(
+            config_values.get("TAPD_HOST") or 
+            os.environ.get("TAPD_HOST") or
+            config_values.get("TAPD_TLS_CERT_PATH") or
+            os.environ.get("TAPD_TLS_CERT_PATH")
+        )
         
         # TAPD connection settings
         # First try config file, then environment variables
@@ -31,10 +40,14 @@ class TaprootSettings:
         default_fee = config_values.get("TAPD_DEFAULT_SAT_FEE") or os.environ.get("TAPD_DEFAULT_SAT_FEE", "1")
         self.default_sat_fee = int(default_fee)
         
-        logger.info("Taproot Assets settings loaded from config file or environment variables")
-        logger.info(f"TAPD_HOST: {self.tapd_host}")
-        logger.info(f"TAPD_TLS_CERT_PATH: {self.tapd_tls_cert_path}")
-        logger.info(f"TAPD_MACAROON_PATH: {self.tapd_macaroon_path}")
+        # Only log config details if we have standalone configuration
+        if self.has_standalone_config:
+            logger.info("Taproot Assets settings loaded for standalone tapd mode")
+            logger.info(f"TAPD_HOST: {self.tapd_host}")
+            logger.info(f"TAPD_TLS_CERT_PATH: {self.tapd_tls_cert_path}")
+            logger.info(f"TAPD_MACAROON_PATH: {self.tapd_macaroon_path}")
+        else:
+            logger.info("No standalone tapd configuration found, will attempt litd integrated mode")
     
     def _load_config_file(self) -> Dict[str, str]:
         """Load settings from taproot_assets.conf file."""
@@ -57,12 +70,12 @@ class TaprootSettings:
                             elif value.startswith("'") and value.endswith("'"):
                                 value = value[1:-1]
                             config_values[key] = value
-                logger.info(f"Loaded config from {config_path}")
+                logger.debug(f"Loaded config from {config_path}")
             except Exception as e:
                 logger.error(f"Error loading config file: {e}")
         else:
-            logger.warning(f"Config file not found at {config_path}")
-            logger.info("Create taproot_assets.conf from taproot_assets.conf.example")
+            # Don't warn about missing config file - it's optional now
+            logger.debug(f"Config file not found at {config_path}, will use litd integrated mode if available")
         
         return config_values
     
