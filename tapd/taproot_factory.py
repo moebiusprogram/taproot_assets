@@ -65,13 +65,13 @@ class TaprootAssetsFactory:
         
         with LogContext(FACTORY, f"Creating wallet and node for user {user_id}, wallet {wallet_id}"):
             # Create wallet
-            log_debug(FACTORY, "Creating TaprootWalletExtension instance")
+            # Create wallet instance
             wallet = TaprootWalletExtension()
             wallet.user = user_id
             wallet.id = wallet_id
             
             # Create node with wallet
-            log_debug(FACTORY, "Creating TaprootAssetsNodeExtension instance")
+            # Create node instance
             node = TaprootAssetsNodeExtension(
                 wallet=wallet,
                 host=host or "",
@@ -84,7 +84,7 @@ class TaprootAssetsFactory:
             )
             
             # Set the node on the wallet
-            log_debug(FACTORY, "Setting node on wallet")
+            # Link node to wallet
             wallet.node = node
             wallet.initialized = True
             

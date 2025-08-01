@@ -114,7 +114,7 @@ class TaprootAssetsNodeExtension(Node):
         # Initialize the base Node class
         super().__init__(wallet)
         
-        log_debug(NODE, "Initializing TaprootAssetsNodeExtension")
+        # Initialize node
         
         # Determine if we should try litd integrated mode
         self.use_litd_integrated = False
@@ -142,7 +142,7 @@ class TaprootAssetsNodeExtension(Node):
                 tapd_macaroon_hex, ln_macaroon_hex
             )
 
-        log_debug(NODE, "Setting up gRPC credentials")
+        # Setup gRPC credentials
         # Setup gRPC credentials for Taproot
         self.credentials = grpc.ssl_channel_credentials(self.cert)
         self.auth_creds = grpc.metadata_call_credentials(
@@ -160,15 +160,11 @@ class TaprootAssetsNodeExtension(Node):
             self.credentials, self.ln_auth_creds
         )
 
-        log_debug(NODE, f"Creating gRPC channels to {self.host}")
         # Create gRPC channels
-        log_info(NODE, f"Creating secure channel to {self.host} with tapd credentials")
+        # Create gRPC channels
         self.channel = grpc.aio.secure_channel(self.host, self.combined_creds)
-        log_info(NODE, f"Channel created: {self.channel}")
         
-        log_info(NODE, "Creating TaprootAssets stub")
         self.stub = create_taprootassets_client(self.channel)
-        log_info(NODE, f"TaprootAssets stub created: {self.stub}")
 
         # Create Lightning gRPC channel
         self.ln_channel = grpc.aio.secure_channel(self.host, self.ln_combined_creds)
@@ -179,7 +175,7 @@ class TaprootAssetsNodeExtension(Node):
         self.tap_channel = grpc.aio.secure_channel(self.host, self.combined_creds)
         self.tapchannel_stub = create_tapchannel_client(self.tap_channel)
 
-        log_debug(NODE, "Initializing managers")
+        # Initialize managers
         # Initialize managers
         self.asset_manager = TaprootAssetManager(self)
         self.invoice_manager = TaprootInvoiceManager(self)
@@ -188,7 +184,7 @@ class TaprootAssetsNodeExtension(Node):
         self.transfer_manager = TaprootTransferManager.get_instance(self)
         
         # Note: Asset transfer monitoring has been removed as it was not fully implemented
-        log_debug(NODE, "All connections initialized successfully")
+        # All connections initialized
     
     def _try_litd_integrated_mode(self, lnbits_settings):
         """Try to configure for litd integrated mode using LNbits LND settings."""
@@ -218,8 +214,14 @@ class TaprootAssetsNodeExtension(Node):
                     
                     if macaroon:
                         macaroon_bytes = load_macaroon(macaroon, encrypted_macaroon)
-                        self.macaroon = macaroon_bytes.hex()
+                        # Process macaroon
+                        # load_macaroon returns hex string in gRPC mode, bytes in REST mode
+                        if isinstance(macaroon_bytes, bytes):
+                            self.macaroon = macaroon_bytes.hex()
+                        else:
+                            self.macaroon = macaroon_bytes
                         self.ln_macaroon = self.macaroon  # Use same macaroon for both
+                        # Macaroon loaded
                         self.use_litd_integrated = True
                         log_info(NODE, f"Configured for litd integrated mode at {self.host}")
                         return
@@ -244,10 +246,10 @@ class TaprootAssetsNodeExtension(Node):
         
         # Read TLS certificate
         try:
-            log_debug(NODE, f"Reading TLS cert from {tls_cert_path}")
+            # Read TLS certificate
             with open(tls_cert_path, 'rb') as f:
                 self.cert = f.read()
-            log_debug(NODE, "Successfully read TLS certificate")
+            # Certificate loaded
         except Exception as e:
             log_error(NODE, f"Failed to read TLS cert from {tls_cert_path}: {str(e)}")
             raise TaprootAssetError(
@@ -261,14 +263,14 @@ class TaprootAssetsNodeExtension(Node):
 
         # Read Taproot macaroon
         if tapd_macaroon_hex:
-            log_debug(NODE, "Using provided tapd_macaroon_hex")
+            # Use hex macaroon
             self.macaroon = tapd_macaroon_hex
         else:
             try:
-                log_debug(NODE, f"Reading Taproot macaroon from {macaroon_path}")
+                # Read macaroon file
                 with open(macaroon_path, 'rb') as f:
                     self.macaroon = f.read().hex()
-                log_debug(NODE, "Successfully read Taproot macaroon")
+                # Macaroon loaded
             except Exception as e:
                 log_error(NODE, f"Failed to read Taproot macaroon from {macaroon_path}: {str(e)}")
                 raise TaprootAssetError(
@@ -281,14 +283,14 @@ class TaprootAssetsNodeExtension(Node):
 
         # Read Lightning macaroon
         if ln_macaroon_hex:
-            log_debug(NODE, "Using provided ln_macaroon_hex")
+            # Use hex macaroon
             self.ln_macaroon = ln_macaroon_hex
         else:
             try:
-                log_debug(NODE, f"Reading Lightning macaroon from {ln_macaroon_path}")
+                # Read macaroon file
                 with open(ln_macaroon_path, 'rb') as f:
                     self.ln_macaroon = f.read().hex()
-                log_debug(NODE, "Successfully read Lightning macaroon")
+                # Macaroon loaded
             except Exception as e:
                 log_error(NODE, f"Failed to read Lightning macaroon from {ln_macaroon_path}: {str(e)}")
                 raise TaprootAssetError(

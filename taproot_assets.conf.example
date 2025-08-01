@@ -1,20 +1,81 @@
 # Taproot Assets Extension Configuration
-# Copy this file to taproot_assets.conf and fill in your settings
+# =====================================
+# Copy this file to taproot_assets.conf and update with your settings
 
-# TAPD connection settings
+# Configuration Modes
+# ------------------
+# This extension supports two connection modes:
+#
+# 1. INTEGRATED MODE (Recommended for litd users)
+#    - Uses LNbits' existing connection to litd
+#    - No configuration file needed
+#    - Requires LNbits to be configured with LndGrpcWallet
+#    - Both LND and tapd calls go through the same litd instance
+#
+# 2. STANDALONE MODE (Using this config file)
+#    - Extension creates its own connections
+#    - Works with any LNbits wallet backend
+#    - Useful when running tapd separately or when LNbits uses REST
+
+# When to use this config file:
+# - You're running tapd as a separate service (not integrated in litd)
+# - LNbits is using REST mode (LndRestWallet) 
+# - You need different credentials for tapd vs LND
+# - You want explicit control over tapd connection settings
+
+# Connection Settings
+# ------------------
+
+# TAPD host and port
+# For litd integrated mode: use gRPC port (usually 10009)
+# For standalone tapd: use tapd's gRPC port (usually 10029)
 TAPD_HOST=127.0.0.1:10009
+
+# Network: mainnet, testnet, regtest, simnet, signet
 TAPD_NETWORK=mainnet
+
+# TLS Certificate Path
+# Local example: /home/ubuntu/.lnd/tls.cert
+# Docker example: /root/.lnd/tls.cert
 TAPD_TLS_CERT_PATH=/home/ubuntu/.lnd/tls.cert
+
+# Taproot Assets Macaroon Path
+# Local example: /home/ubuntu/.tapd/data/mainnet/admin.macaroon
+# Docker example: /root/.tapd/data/mainnet/admin.macaroon
 TAPD_MACAROON_PATH=/home/ubuntu/.tapd/data/mainnet/admin.macaroon
 
 # Optional: Use hex-encoded macaroon instead of file path
-# TAPD_MACAROON_HEX=
+# Useful for environments where file access is restricted
+# TAPD_MACAROON_HEX=0201036c6e6402...
 
-# LND connection settings (for tapd operations that require LND)
+# LND Settings (for operations requiring LND access)
+# -------------------------------------------------
+
+# LND Macaroon Path (used for Lightning operations)
+# Local example: /home/ubuntu/.lnd/data/chain/bitcoin/mainnet/admin.macaroon
+# Docker example: /root/.lnd/data/chain/bitcoin/mainnet/admin.macaroon
 LND_REST_MACAROON=/home/ubuntu/.lnd/data/chain/bitcoin/mainnet/admin.macaroon
 
-# Optional: Use hex-encoded LND macaroon instead of file path
-# LND_MACAROON_HEX=
+# Optional: Use hex-encoded LND macaroon
+# LND_MACAROON_HEX=0201036c6e6402...
 
-# Fee settings
+# Fee Settings
+# -----------
+
+# Default fee in satoshis for on-chain transactions
 TAPD_DEFAULT_SAT_FEE=1
+
+# Docker Configuration Example
+# ---------------------------
+# If running in Docker, use these paths instead:
+#
+# TAPD_HOST=lit:10009
+# TAPD_TLS_CERT_PATH=/root/.lnd/tls.cert
+# TAPD_MACAROON_PATH=/root/.tapd/data/mainnet/admin.macaroon
+# LND_REST_MACAROON=/root/.lnd/data/chain/bitcoin/mainnet/admin.macaroon
+
+# Environment Variables
+# --------------------
+# All settings can also be provided via environment variables.
+# Environment variables take precedence over this config file.
+# Prefix each setting with TAPD_ or LND_ as shown above.
