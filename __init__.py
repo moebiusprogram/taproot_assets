@@ -1,9 +1,15 @@
 import asyncio
+import sys
+import os
+
 from fastapi import APIRouter
 from loguru import logger
 from .db import db
 from .views import taproot_assets_router
 from .views_api import taproot_assets_api_router
+
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'lnbits'))
 
 # Create router with prefix for the extension
 taproot_assets_ext = APIRouter(prefix="/taproot_assets", tags=["taproot_assets"])
